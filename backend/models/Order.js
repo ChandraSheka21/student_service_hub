@@ -14,12 +14,28 @@ const OrderSchema = new mongoose.Schema({
   totalPrice: { type: Number, required: true, min: 0 },
   status: {
     type: String,
-    enum: ['Order placed', 'In queue', 'Packed successfully', 'Ready to collect', 'Delivered'],
+    enum: ['Order placed', 'In queue', 'Packed successfully', 'Ready to collect', 'Delivered', 'Reviewed', 'Processing', 'Ready to Collect', 'Cancelled'],
     default: 'Order placed',
   },
+  paymentStatus: {
+    type: String,
+    enum: ['Pending', 'Paid', 'Failed'],
+    default: 'Pending',
+  },
+  remarks: { type: String, default: '' },
+  statusHistory: [
+    {
+      status: String,
+      timestamp: { type: Date, default: Date.now },
+      changedBy: String,
+    }
+  ],
   createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
 });
 
 OrderSchema.index({ orderNumber: 1 });
+OrderSchema.index({ studentId: 1, createdAt: -1 });
+OrderSchema.index({ status: 1 });
 
 module.exports = mongoose.model('Order', OrderSchema);

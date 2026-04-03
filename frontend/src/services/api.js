@@ -1,5 +1,13 @@
 const BASE_URL = 'http://localhost:5000/api';
 
+const getAuthHeader = (token = null) => {
+    const adminToken = token || localStorage.getItem('admin_token');
+    return {
+        'Content-Type': 'application/json',
+        ...(adminToken && { 'Authorization': `Bearer ${adminToken}` })
+    };
+};
+
 export const api = {
     // --- Student ---
     loginStudent: async (roll_number) => {
@@ -24,6 +32,19 @@ export const api = {
     },
     getStudentOrders: async (roll_number) => {
         const res = await fetch(`${BASE_URL}/student/orders/${roll_number}`);
+        return res.json();
+    },
+    getStudentNotifications: async (studentId) => {
+        const res = await fetch(`${BASE_URL}/notifications?recipientId=${studentId}&recipientType=Student`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    markNotificationAsRead: async (notificationId) => {
+        const res = await fetch(`${BASE_URL}/notifications/${notificationId}/read`, {
+            method: 'PUT',
+            headers: getAuthHeader()
+        });
         return res.json();
     },
 
@@ -68,6 +89,116 @@ export const api = {
     },
     getManagerAnalytics: async () => {
         const res = await fetch(`${BASE_URL}/manager/analytics`);
+        return res.json();
+    },
+
+    // --- Admin ---
+    // Dashboard
+    getAdminStats: async () => {
+        const res = await fetch(`${BASE_URL}/admin/stats`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+
+    // Orders
+    getAdminOrders: async (filters = {}) => {
+        const params = new URLSearchParams();
+        if (filters.status) params.append('status', filters.status);
+        if (filters.studentName) params.append('studentName', filters.studentName);
+        if (filters.studentId) params.append('studentId', filters.studentId);
+        if (filters.orderId) params.append('orderId', filters.orderId);
+        if (filters.paymentStatus) params.append('paymentStatus', filters.paymentStatus);
+        
+        const query = params.toString() ? `?${params.toString()}` : '';
+        const res = await fetch(`${BASE_URL}/admin/orders${query}`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    getAdminOrderDetail: async (orderId) => {
+        const res = await fetch(`${BASE_URL}/admin/orders/${orderId}`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    updateAdminOrderStatus: async (orderId, status, remarks = '') => {
+        const res = await fetch(`${BASE_URL}/admin/orders/${orderId}/status`, {
+            method: 'PUT',
+            headers: getAuthHeader(),
+            body: JSON.stringify({ status, remarks })
+        });
+        return res.json();
+    },
+    updateAdminPaymentStatus: async (orderId, paymentStatus) => {
+        const res = await fetch(`${BASE_URL}/admin/orders/${orderId}/payment-status`, {
+            method: 'PUT',
+            headers: getAuthHeader(),
+            body: JSON.stringify({ paymentStatus })
+        });
+        return res.json();
+    },
+
+    // Inventory/Stock
+    getAdminInventory: async (filters = {}) => {
+        const params = new URLSearchParams();
+        if (filters.category) params.append('category', filters.category);
+        if (filters.sortBy) params.append('sortBy', filters.sortBy);
+        
+        const query = params.toString() ? `?${params.toString()}` : '';
+        const res = await fetch(`${BASE_URL}/admin/inventory${query}`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    getStockAnalytics: async () => {
+        const res = await fetch(`${BASE_URL}/admin/inventory/analytics`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    updateAdminStock: async (productId, quantity, action = 'set') => {
+        const res = await fetch(`${BASE_URL}/admin/inventory/${productId}`, {
+            method: 'PUT',
+            headers: getAuthHeader(),
+            body: JSON.stringify({ quantity, action })
+        });
+        return res.json();
+    },
+
+    // Notifications
+    getAdminNotifications: async () => {
+        const res = await fetch(`${BASE_URL}/admin/notifications?recipientType=Admin`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    markNotificationRead: async (notificationId) => {
+        const res = await fetch(`${BASE_URL}/admin/notifications/${notificationId}/read`, {
+            method: 'PUT',
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    markAllNotificationsRead: async () => {
+        const res = await fetch(`${BASE_URL}/admin/notifications/mark-all-read`, {
+            method: 'PUT',
+            headers: getAuthHeader(),
+            body: JSON.stringify({ recipientType: 'Admin' })
+        });
+        return res.json();
+    },
+    getUnreadCount: async () => {
+        const res = await fetch(`${BASE_URL}/admin/notifications/unread-count?recipientType=Admin`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    deleteNotification: async (notificationId) => {
+        const res = await fetch(`${BASE_URL}/admin/notifications/${notificationId}`, {
+            method: 'DELETE',
+            headers: getAuthHeader()
+        });
         return res.json();
     }
 };

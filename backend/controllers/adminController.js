@@ -2,25 +2,64 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 const Upload = require('../models/Upload');
 const Student = require('../models/Student');
+const Notification = require('../models/Notification');
 
+// Helper functions
+const createNotification = async (recipientId, recipientType, type, title, message, orderId = null, productId = null) => {
+  try {
+    const notification = new Notification({
+      recipientId,
+      recipientType,
+      type,
+      title,
+      message,
+      orderId,
+      productId,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+    });
+    await notification.save();
+    return notification;
+  } catch (error) {
+    console.error('Error creating notification:', error);
+  }
+};
+
+const logAuditTrail = (data) => {
+  console.log('[AUDIT LOG]', data);
+};
+
+// ===== DASHBOARD STATISTICS =====
 const getDashboardStats = async (req, res) => {
   try {
     const totalOrders = await Order.countDocuments();
-    const pendingOrders = await Order.countDocuments({ status: 'Pending' });
+    const pendingOrders = await Order.countDocuments({ status: { $in: ['Order placed', 'In queue'] } });
     const reviewedOrders = await Order.countDocuments({ status: 'Reviewed' });
-    const readyToCollect = await Order.countDocuments({ status: 'Ready to Collect' });
+    const processingOrders = await Order.countDocuments({ status: 'Processing' });
+    const readyToCollect = await Order.countDocuments({ status: { $in: ['Packed successfully', 'Ready to collect', 'Ready to Collect'] } });
     const deliveredOrders = await Order.countDocuments({ status: 'Delivered' });
+    const cancelledOrders = await Order.countDocuments({ status: 'Cancelled' });
 
     // Calculate total revenue
     const revenueData = await Order.aggregate([
       { $match: { status: 'Delivered' } },
-      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+      { $group: { _id: null, total: { $sum: '$totalPrice' } } }
     ]);
     const totalRevenue = revenueData[0]?.total || 0;
 
+    // Calculate total pending amount
+    const pendingRevenueData = await Order.aggregate([
+      { $match: { status: { $nin: ['Delivered', 'Cancelled'] } } },
+      { $group: { _id: null, total: { $sum: '$totalPrice' } } }
+    ]);
+    const pendingRevenue = pendingRevenueData[0]?.total || 0;
+
+    // Get low stock items
+    const lowStockItems = await Product.find({ stock: { $lt: 20 } }).select('name stock').limit(5);
+
+    // Get top products
     const topProducts = await Order.aggregate([
       { $unwind: '$items' },
-      { $group: { _id: '$items.productId', sold: { $sum: '$items.quantity' } } },
+      { $group: { _id: '$items.productId', sold: { $sum: '$items.quantity' }, totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } } } },
       { $sort: { sold: -1 } },
       { $limit: 5 },
       {
@@ -34,55 +73,81 @@ const getDashboardStats = async (req, res) => {
       { $unwind: '$product' },
       {
         $project: {
-          productId: '$_id',
-          name: '$product.name',
+          _id: 1,
+          productName: '$product.name',
           sold: 1,
+          totalRevenue: 1,
         },
       },
     ]);
 
+    // Get recent orders
+    const recentOrders = await Order.find({})
+      .populate('studentId', 'name rollNo')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select('orderNumber studentId totalPrice status createdAt');
+
     res.json({
-      totalOrders,
-      pendingOrders,
-      reviewedOrders,
-      readyToCollect,
-      deliveredOrders,
-      totalRevenue,
-      topProducts
+      summary: {
+        totalOrders,
+        pendingOrders,
+        reviewedOrders,
+        processingOrders,
+        readyToCollect,
+        deliveredOrders,
+        cancelledOrders,
+        totalRevenue,
+        pendingRevenue
+      },
+      lowStockItems,
+      topProducts,
+      recentOrders
     });
   } catch (error) {
     res.status(500).json({ message: 'Error fetching stats', error: error.message });
   }
 };
 
-// Get all orders with filters
+// ===== ORDERS MANAGEMENT =====
 const getAllOrders = async (req, res) => {
   try {
-    const { status, studentName, studentId, orderId } = req.query;
+    const { status, studentName, studentId, orderId, paymentStatus, sortBy = 'desc' } = req.query;
     
     let filter = {};
     if (status) filter.status = status;
-    if (studentName) filter['student.name'] = { $regex: studentName, $options: 'i' };
-    if (studentId) filter['student.rollNumber'] = studentId;
-    if (orderId) filter._id = orderId;
+    if (paymentStatus) filter.paymentStatus = paymentStatus;
+    if (studentId) filter.studentId = studentId;
+    if (orderId) filter.orderNumber = { $regex: orderId, $options: 'i' };
 
-    const orders = await Order.find(filter)
-      .populate('student')
-      .sort({ createdAt: -1 })
-      .lean();
+    let orders = await Order.find(filter)
+      .populate('studentId', 'name rollNo email department mobile')
+      .sort({ createdAt: sortBy === 'asc' ? 1 : -1 });
+
+    // Filter by student name if provided
+    if (studentName) {
+      orders = orders.filter(order =>
+        order.studentId?.name?.toLowerCase().includes(studentName.toLowerCase())
+      );
+    }
 
     // Format response
     const formattedOrders = orders.map(order => ({
       id: order._id,
-      studentName: order.student?.name || 'Unknown',
-      studentId: order.student?.rollNumber || 'N/A',
-      items: order.items?.map(item => item.name).join(', ') || 'N/A',
-      quantity: order.items?.reduce((sum, item) => sum + item.quantity, 0) || 0,
-      amount: order.totalAmount || 0,
+      orderNumber: order.orderNumber,
+      studentName: order.studentId?.name || 'Unknown',
+      studentId: order.studentId?.rollNo || 'N/A',
+      studentEmail: order.studentId?.email || 'N/A',
+      studentDepartment: order.studentId?.department || 'N/A',
+      items: order.items?.map(item => ({ name: item.name, quantity: item.quantity, price: item.price })) || [],
+      itemCount: order.items?.length || 0,
+      totalQuantity: order.items?.reduce((sum, item) => sum + item.quantity, 0) || 0,
+      totalAmount: order.totalPrice || 0,
       paymentStatus: order.paymentStatus || 'Pending',
-      orderDate: order.createdAt?.toLocaleString() || 'N/A',
-      status: order.status || 'Pending',
-      remarks: order.remarks || ''
+      orderDate: order.createdAt,
+      status: order.status || 'Order placed',
+      remarks: order.remarks || '',
+      statusHistory: order.statusHistory || []
     }));
 
     res.json(formattedOrders);
@@ -91,71 +156,175 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// Update order status
-const updateOrderStatus = async (req, res) => {
+// Get single order detail
+const getOrderDetail = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status } = req.body;
 
-    const validStatuses = ['Pending', 'Reviewed', 'Processing', 'Ready to Collect', 'Delivered', 'Cancelled'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: 'Invalid status' });
-    }
-
-    const order = await Order.findByIdAndUpdate(
-      orderId,
-      { status, updatedAt: new Date() },
-      { new: true }
-    ).populate('student');
+    const order = await Order.findById(orderId)
+      .populate('studentId', 'name rollNo email department mobile uploadCount')
+      .populate('items.productId', 'name price stock');
 
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    // Log to audit trail
-    if (req.admin) {
-      logAuditTrail({
-        adminId: req.admin._id,
-        action: 'UPDATE_ORDER_STATUS',
-        orderId: orderId,
-        oldStatus: order.status,
-        newStatus: status,
-        timestamp: new Date()
-      });
+    res.json({
+      id: order._id,
+      orderNumber: order.orderNumber,
+      student: order.studentId,
+      items: order.items?.map(item => ({
+        productId: item.productId?._id,
+        productName: item.productId?.name || item.name,
+        quantity: item.quantity,
+        price: item.price,
+        subtotal: item.quantity * item.price
+      })) || [],
+      totalAmount: order.totalPrice,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      remarks: order.remarks,
+      createdAt: order.createdAt,
+      statusHistory: order.statusHistory || []
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching order detail', error: error.message });
+  }
+};
+
+// Update order status
+const updateOrderStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { status, remarks } = req.body;
+    const adminId = req.admin?._id || req.user?._id || 'system';
+
+    const validStatuses = ['Order placed', 'In queue', 'Reviewed', 'Processing', 'Packed successfully', 'Ready to collect', 'Ready to Collect', 'Delivered', 'Cancelled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: 'Invalid status' });
     }
 
-    // Send notification to student
-    notifyStudent(order.student._id, {
-      type: 'order_status',
-      title: `Order Status Updated`,
-      message: `Your order status has been updated to ${status}`,
-      orderId: orderId
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const updatedOrder = await Order.findByIdAndUpdate(
+      orderId,
+      {
+        status,
+        remarks: remarks || order.remarks,
+        updatedAt: new Date(),
+        $push: {
+          statusHistory: {
+            status,
+            timestamp: new Date(),
+            changedBy: adminId.toString()
+          }
+        }
+      },
+      { new: true }
+    ).populate('studentId');
+
+    // Log to audit trail
+    logAuditTrail({
+      adminId,
+      action: 'UPDATE_ORDER_STATUS',
+      orderId: orderId,
+      newStatus: status,
+      timestamp: new Date()
     });
 
-    res.json({ message: 'Order status updated', order });
+    // Send notification to student based on status
+    const notificationMessages = {
+      'Reviewed': { title: '✓ Order Reviewed', message: 'Your order has been reviewed by the admin.' },
+      'Processing': { title: '⚙ Order Processing', message: 'Your order is being processed.' },
+      'Packed successfully': { title: '📦 Order Packed', message: 'Your order has been packed successfully.' },
+      'Ready to collect': { title: '🎁 Ready to Collect', message: 'Your order is ready to collect from the counter.' },
+      'Ready to Collect': { title: '🎁 Ready to Collect', message: 'Your order is ready to collect from the counter.' },
+      'Delivered': { title: '✅ Order Delivered', message: 'Your order has been delivered.' },
+      'Cancelled': { title: '❌ Order Cancelled', message: 'Your order has been cancelled.' }
+    };
+
+    if (notificationMessages[status]) {
+      await createNotification(
+        updatedOrder.studentId._id,
+        'Student',
+        `order_${status.toLowerCase().replace(/\s+/g, '_')}`,
+        notificationMessages[status].title,
+        notificationMessages[status].message,
+        updatedOrder._id
+      );
+    }
+
+    res.json({ message: 'Order status updated successfully', order: updatedOrder });
   } catch (error) {
     res.status(500).json({ message: 'Error updating order', error: error.message });
   }
 };
 
-// Get inventory/stock
+// Update order payment status
+const updatePaymentStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { paymentStatus } = req.body;
+
+    const validPaymentStatuses = ['Pending', 'Paid', 'Failed'];
+    if (!validPaymentStatuses.includes(paymentStatus)) {
+      return res.status(400).json({ message: 'Invalid payment status' });
+    }
+
+    const order = await Order.findByIdAndUpdate(
+      orderId,
+      { paymentStatus, updatedAt: new Date() },
+      { new: true }
+    ).populate('studentId');
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    res.json({ message: 'Payment status updated', order });
+  } catch (error) {
+    res.status(500).json({ message: 'Error updating payment status', error: error.message });
+  }
+};
+
+// ===== INVENTORY/STOCK MANAGEMENT =====
 const getInventory = async (req, res) => {
   try {
-    const products = await Product.find({})
-      .select('name stock price category')
-      .lean();
+    const { category, sortBy = 'name' } = req.query;
+
+    let filter = {};
+    if (category) filter.category = category;
+
+    const products = await Product.find(filter)
+      .select('name stock price category image createdAt')
+      .sort(sortBy === 'stock' ? { stock: 1 } : { name: 1 });
 
     const inventory = products.map(product => ({
       id: product._id,
       name: product.name,
-      quantity: product.stock || 0,
+      stock: product.stock || 0,
       price: product.price || 0,
       category: product.category || 'General',
-      minStock: 20, // Default minimum
-      lastUpdated: new Date().toISOString().split('T')[0]
+      image: product.image || '',
+      status: product.stock < 20 ? 'Low Stock' : product.stock === 0 ? 'Out of Stock' : 'In Stock',
+      lastUpdated: product.createdAt
     }));
 
-    res.json(inventory);
+    // Get categories
+    const categories = await Product.distinct('category');
+
+    res.json({
+      inventory,
+      categories,
+      stats: {
+        totalProducts: inventory.length,
+        outOfStock: inventory.filter(item => item.stock === 0).length,
+        lowStock: inventory.filter(item => item.stock > 0 && item.stock < 20).length
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: 'Error fetching inventory', error: error.message });
   }
@@ -165,36 +334,108 @@ const getInventory = async (req, res) => {
 const updateStock = async (req, res) => {
   try {
     const { productId } = req.params;
-    const { quantity } = req.body;
+    const { quantity, action } = req.body;
+    const adminId = req.admin?._id || req.user?._id || 'system';
 
-    const product = await Product.findByIdAndUpdate(
-      productId,
-      { stock: quantity },
-      { new: true }
-    );
+    const product = await Product.findById(productId);
 
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
 
-    // Log audit trail
-    if (req.admin) {
-      logAuditTrail({
-        adminId: req.admin._id,
-        action: 'UPDATE_STOCK',
-        productId: productId,
-        quantity: quantity,
-        timestamp: new Date()
-      });
+    let oldStock = product.stock;
+    let newStock = oldStock;
+
+    if (action === 'set') {
+      newStock = quantity;
+    } else if (action === 'add') {
+      newStock = oldStock + quantity;
+    } else if (action === 'subtract') {
+      newStock = Math.max(0, oldStock - quantity);
+    } else {
+      newStock = quantity;
     }
 
-    res.json({ message: 'Stock updated', product });
+    const updatedProduct = await Product.findByIdAndUpdate(
+      productId,
+      { stock: newStock },
+      { new: true }
+    );
+
+    // Log audit trail
+    logAuditTrail({
+      adminId,
+      action: 'UPDATE_STOCK',
+      productId: productId,
+      oldStock,
+      newStock,
+      timestamp: new Date()
+    });
+
+    // Notify admins if stock is low
+    if (newStock < 20 && oldStock >= 20) {
+      await createNotification(
+        '6000000000000000000001', // Placeholder for admin group
+        'Admin',
+        'low_stock_alert',
+        '⚠ Low Stock Alert',
+        `${product.name} is now low in stock (${newStock} units remaining)`,
+        null,
+        product._id
+      );
+    }
+
+    res.json({
+      message: 'Stock updated successfully',
+      product: {
+        id: updatedProduct._id,
+        name: updatedProduct.name,
+        oldStock,
+        newStock
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: 'Error updating stock', error: error.message });
   }
 };
 
-// Admin can verify or delete uploads
+// Get stock analytics
+const getStockAnalytics = async (req, res) => {
+  try {
+    const lowStockItems = await Product.find({ stock: { $lt: 20, $gt: 0 } })
+      .select('name stock price')
+      .sort({ stock: 1 });
+
+    const outOfStockItems = await Product.find({ stock: 0 })
+      .select('name price');
+
+    const totalValue = await Product.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalValue: { $sum: { $multiply: ['$stock', '$price'] } },
+          totalItems: { $sum: '$stock' }
+        }
+      }
+    ]);
+
+    res.json({
+      lowStockItems: lowStockItems.map(item => ({
+        name: item.name,
+        stock: item.stock,
+        price: item.price,
+        value: item.stock * item.price
+      })),
+      outOfStockItems,
+      totalInventoryValue: totalValue[0]?.totalValue || 0,
+      totalItemsInStock: totalValue[0]?.totalItems || 0
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching stock analytics', error: error.message });
+  }
+};
+
+// ===== UPLOADS MANAGEMENT =====
 const verifyUpload = async (req, res) => {
   try {
     const { id } = req.params;
@@ -220,23 +461,15 @@ const deleteUpload = async (req, res) => {
   }
 };
 
-// Helper functions
-const logAuditTrail = (data) => {
-  // Store in database or file
-  console.log('[AUDIT LOG]', data);
-};
-
-const notifyStudent = (studentId, notification) => {
-  // Send notification to student
-  console.log('[NOTIFICATION]', { studentId, notification });
-};
-
 module.exports = {
   getDashboardStats,
   getAllOrders,
+  getOrderDetail,
   updateOrderStatus,
+  updatePaymentStatus,
   getInventory,
   updateStock,
+  getStockAnalytics,
   verifyUpload,
   deleteUpload
 };

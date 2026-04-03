@@ -1,222 +1,344 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Trash2, CheckCircle, Clock, AlertCircle } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Bell, Trash2, CheckCircle, BarChart3, Package, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { api } from '../../../services/api';
 
 function AdminNotifications() {
-    const [notifications, setNotifications] = useState([
-        {
-            id: 1,
-            type: 'order',
-            title: 'New Order Received',
-            message: 'Student Rajesh Kumar placed a new order for ₹500',
-            timestamp: '10 mins ago',
-            read: false,
-            icon: Bell,
-            color: '#3B82F6'
-        },
-        {
-            id: 2,
-            type: 'stock',
-            title: 'Low Stock Alert',
-            message: 'Notebooks inventory is running low (15 items left)',
-            timestamp: '1 hour ago',
-            read: false,
-            icon: AlertCircle,
-            color: '#F59E0B'
-        },
-        {
-            id: 3,
-            type: 'status',
-            title: 'Order Status Updated',
-            message: 'Order ORD-002 has been marked as Ready to Collect',
-            timestamp: '2 hours ago',
-            read: true,
-            icon: CheckCircle,
-            color: '#10B981'
-        },
-        {
-            id: 4,
-            type: 'order',
-            title: 'New Order Received',
-            message: 'Student Priya Singh placed a new order for ₹150',
-            timestamp: '3 hours ago',
-            read: true,
-            icon: Bell,
-            color: '#3B82F6'
-        },
-        {
-            id: 5,
-            type: 'payment',
-            title: 'Payment Received',
-            message: 'Payment of ₹800 received for Order ORD-003',
-            timestamp: '4 hours ago',
-            read: true,
-            icon: CheckCircle,
-            color: '#10B981'
+    const [notifications, setNotifications] = useState([]);
+    const [filteredNotifications, setFilteredNotifications] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [filter, setFilter] = useState('all');
+    const [unreadCount, setUnreadCount] = useState(0);
+
+    useEffect(() => {
+        fetchNotifications();
+        const interval = setInterval(fetchNotifications, 15000);
+        return () => clearInterval(interval);
+    }, []);
+
+    useEffect(() => {
+        applyFilter();
+    }, [notifications, filter]);
+
+    const fetchNotifications = async () => {
+        try {
+            setLoading(true);
+            const data = await api.getAdminNotifications();
+            setNotifications(Array.isArray(data) ? data : []);
+            
+            // Count unread
+            const unread = (Array.isArray(data) ? data : []).filter(n => !n.read).length;
+            setUnreadCount(unread);
+        } catch (err) {
+            console.error('Error fetching notifications:', err);
+            setNotifications([]);
+        } finally {
+            setLoading(false);
         }
-    ]);
-
-    const markAsRead = (id) => {
-        setNotifications(notifications.map(notif =>
-            notif.id === id ? { ...notif, read: true } : notif
-        ));
     };
 
-    const deleteNotification = (id) => {
-        setNotifications(notifications.filter(notif => notif.id !== id));
+    const applyFilter = () => {
+        let filtered = notifications;
+
+        if (filter === 'unread') {
+            filtered = filtered.filter(n => !n.read);
+        } else if (filter === 'orders') {
+            filtered = filtered.filter(n => n.type?.includes('order'));
+        } else if (filter === 'stock') {
+            filtered = filtered.filter(n => n.type?.includes('stock'));
+        }
+
+        setFilteredNotifications(filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
     };
 
-    const markAllAsRead = () => {
-        setNotifications(notifications.map(notif => ({ ...notif, read: true })));
+    const handleMarkAsRead = async (notificationId) => {
+        try {
+            await api.markNotificationRead(notificationId);
+            setNotifications(notifications.map(n =>
+                n._id === notificationId ? { ...n, read: true, readAt: new Date() } : n
+            ));
+        } catch (err) {
+            console.error('Error marking notification:', err);
+        }
     };
 
-    const unreadCount = notifications.filter(n => !n.read).length;
+    const handleMarkAllAsRead = async () => {
+        try {
+            await api.markAllNotificationsRead();
+            setNotifications(notifications.map(n => ({ ...n, read: true, readAt: new Date() })));
+        } catch (err) {
+            console.error('Error marking all notifications:', err);
+        }
+    };
+
+    const handleDelete = async (notificationId) => {
+        try {
+            await api.deleteNotification(notificationId);
+            setNotifications(notifications.filter(n => n._id !== notificationId));
+        } catch (err) {
+            console.error('Error deleting notification:', err);
+        }
+    };
+
+    const getNotificationIcon = (type) => {
+        if (type?.includes('order')) return <Package size={20} color="#3B82F6" />;
+        if (type?.includes('stock')) return <AlertCircle size={20} color="#F59E0B" />;
+        return <Bell size={20} color="#6B7280" />;
+    };
+
+    const getNotificationColor = (type) => {
+        if (type?.includes('order')) return '#DBEAFE';
+        if (type?.includes('stock')) return '#FEF3C7';
+        return '#F3F4F6';
+    };
+
+    const getNotificationBorderColor = (type) => {
+        if (type?.includes('order')) return '#3B82F6';
+        if (type?.includes('stock')) return '#F59E0B';
+        return '#D1D5DB';
+    };
+
+    if (loading && notifications.length === 0) {
+        return (
+            <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
+                <p style={{ color: 'var(--text-muted)' }}>Loading notifications...</p>
+            </div>
+        );
+    }
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {/* Header */}
-            <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '1rem'
-            }}>
-                <h2 style={{ margin: 0 }}>Notifications</h2>
-                {unreadCount > 0 && (
-                    <button
-                        onClick={markAllAsRead}
-                        className="btn btn-secondary"
-                        style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
-                    >
-                        Mark all as read
-                    </button>
-                )}
-            </div>
-
-            {/* Unread Badge */}
-            {unreadCount > 0 && (
+            {/* Header with Actions */}
+            <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="card"
+                style={{ padding: '1.5rem' }}
+            >
                 <div style={{
-                    padding: '1rem',
-                    background: '#EFF6FF',
-                    border: '1px solid #DBEAFE',
-                    borderRadius: '0.5rem',
-                    color: '#0284C7'
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '1rem'
                 }}>
-                    You have <strong>{unreadCount}</strong> unread notification{unreadCount > 1 ? 's' : ''}
+                    <div>
+                        <h3 style={{ margin: 0, marginBottom: '0.25rem' }}>Notifications</h3>
+                        <p style={{
+                            margin: 0,
+                            fontSize: '0.875rem',
+                            color: 'var(--text-muted)'
+                        }}>
+                            {unreadCount} unread • {notifications.length} total
+                        </p>
+                    </div>
+
+                    {unreadCount > 0 && (
+                        <button
+                            onClick={handleMarkAllAsRead}
+                            className="btn btn-sm"
+                            style={{
+                                background: 'var(--primary)',
+                                color: 'white',
+                                border: 'none'
+                            }}
+                        >
+                            Mark all as read
+                        </button>
+                    )}
                 </div>
-            )}
+            </motion.div>
+
+            {/* Filters */}
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                style={{
+                    display: 'flex',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap'
+                }}
+            >
+                {[
+                    { value: 'all', label: 'All', icon: Bell },
+                    { value: 'unread', label: 'Unread', icon: AlertCircle },
+                    { value: 'orders', label: 'Orders', icon: Package },
+                    { value: 'stock', label: 'Stock', icon: BarChart3 }
+                ].map(item => (
+                    <button
+                        key={item.value}
+                        onClick={() => setFilter(item.value)}
+                        style={{
+                            padding: '0.5rem 1rem',
+                            border: filter === item.value ? '2px solid var(--primary)' : '1px solid var(--border)',
+                            background: filter === item.value ? 'var(--primary)15' : 'transparent',
+                            color: filter === item.value ? 'var(--primary)' : 'var(--text)',
+                            borderRadius: '0.5rem',
+                            cursor: 'pointer',
+                            fontWeight: '500',
+                            fontSize: '0.9rem',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        <item.icon size={16} style={{ display: 'inline-block', marginRight: '0.5rem' }} />
+                        {item.label}
+                    </button>
+                ))}
+            </motion.div>
 
             {/* Notifications List */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {notifications.length === 0 ? (
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+            >
+                {filteredNotifications.length === 0 ? (
                     <div className="card" style={{
-                        padding: '2rem',
-                        textAlign: 'center',
-                        color: 'var(--text-muted)'
+                        padding: '3rem',
+                        textAlign: 'center'
                     }}>
-                        <Bell size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
-                        <p>No notifications</p>
+                        <Bell size={48} style={{
+                            margin: '0 auto 1rem',
+                            color: 'var(--text-muted)',
+                            opacity: 0.3
+                        }} />
+                        <p style={{
+                            margin: 0,
+                            fontSize: '1.1rem',
+                            color: 'var(--text-muted)'
+                        }}>
+                            No notifications
+                        </p>
+                        {filter !== 'all' && (
+                            <button
+                                onClick={() => setFilter('all')}
+                                className="btn btn-sm"
+                                style={{
+                                    marginTop: '1rem',
+                                    background: 'var(--primary)',
+                                    color: 'white',
+                                    border: 'none'
+                                }}
+                            >
+                                View all notifications
+                            </button>
+                        )}
                     </div>
                 ) : (
-                    notifications.map((notification, index) => {
-                        const IconComponent = notification.icon;
-                        return (
+                    <AnimatePresence>
+                        {filteredNotifications.map((notification, index) => (
                             <motion.div
-                                key={notification.id}
+                                key={notification._id}
                                 initial={{ opacity: 0, x: -20 }}
                                 animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: index * 0.1 }}
+                                exit={{ opacity: 0, x: -20 }}
+                                transition={{ delay: index * 0.05 }}
                                 className="card"
                                 style={{
                                     padding: '1.5rem',
-                                    borderLeft: `4px solid ${notification.color}`,
-                                    background: !notification.read ? 'rgba(59, 130, 246, 0.05)' : 'transparent',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    gap: '1rem'
+                                    marginBottom: '1rem',
+                                    borderLeft: `4px solid ${getNotificationBorderColor(notification.type)}`,
+                                    background: getNotificationColor(notification.type),
+                                    opacity: notification.read ? 0.7 : 1
                                 }}
                             >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: '1rem'
+                                }}>
+                                    {/* Icon */}
                                     <div style={{
-                                        width: '50px',
-                                        height: '50px',
-                                        borderRadius: '50%',
-                                        background: `${notification.color}20`,
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        flexShrink: 0
+                                        flexShrink: 0,
+                                        marginTop: '0.25rem'
                                     }}>
-                                        <IconComponent size={24} color={notification.color} />
+                                        {getNotificationIcon(notification.type)}
                                     </div>
 
+                                    {/* Content */}
                                     <div style={{ flex: 1 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                                            <h3 style={{ margin: 0, fontWeight: !notification.read ? '600' : '500' }}>
-                                                {notification.title}
-                                            </h3>
-                                            {!notification.read && (
-                                                <span style={{
-                                                    width: '8px',
-                                                    height: '8px',
-                                                    borderRadius: '50%',
-                                                    background: '#3B82F6'
-                                                }}></span>
-                                            )}
-                                        </div>
-                                        <p style={{
-                                            margin: 0,
-                                            fontSize: '0.875rem',
-                                            color: 'var(--text-muted)'
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'flex-start',
+                                            justifyContent: 'space-between',
+                                            gap: '1rem'
                                         }}>
-                                            {notification.message}
-                                        </p>
-                                        <p style={{
-                                            margin: '0.5rem 0 0 0',
-                                            fontSize: '0.75rem',
-                                            color: 'var(--text-muted)'
-                                        }}>
-                                            {notification.timestamp}
-                                        </p>
-                                    </div>
-                                </div>
+                                            <div>
+                                                <h4 style={{
+                                                    margin: 0,
+                                                    marginBottom: '0.25rem',
+                                                    fontSize: '1rem',
+                                                    fontWeight: '600'
+                                                }}>
+                                                    {notification.title}
+                                                </h4>
+                                                <p style={{
+                                                    margin: '0.5rem 0 0 0',
+                                                    fontSize: '0.9rem',
+                                                    color: 'var(--text)',
+                                                    lineHeight: '1.5'
+                                                }}>
+                                                    {notification.message}
+                                                </p>
+                                                <p style={{
+                                                    margin: '0.75rem 0 0 0',
+                                                    fontSize: '0.8rem',
+                                                    color: 'var(--text-muted)'
+                                                }}>
+                                                    {new Date(notification.createdAt).toLocaleString()}
+                                                </p>
+                                            </div>
 
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    {!notification.read && (
-                                        <button
-                                            onClick={() => markAsRead(notification.id)}
-                                            style={{
-                                                background: 'none',
-                                                border: 'none',
-                                                cursor: 'pointer',
-                                                color: '#3B82F6',
-                                                padding: '0.25rem'
-                                            }}
-                                            title="Mark as read"
-                                        >
-                                            <CheckCircle size={18} />
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => deleteNotification(notification.id)}
-                                        style={{
-                                            background: 'none',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            color: '#EF4444',
-                                            padding: '0.25rem'
-                                        }}
-                                        title="Delete"
-                                    >
-                                        <Trash2 size={18} />
-                                    </button>
+                                            {/* Actions */}
+                                            <div style={{
+                                                display: 'flex',
+                                                gap: '0.5rem',
+                                                flexShrink: 0
+                                            }}>
+                                                {!notification.read && (
+                                                    <button
+                                                        onClick={() => handleMarkAsRead(notification._id)}
+                                                        style={{
+                                                            background: 'transparent',
+                                                            border: 'none',
+                                                            cursor: 'pointer',
+                                                            color: 'var(--primary)',
+                                                            padding: '0.5rem',
+                                                            borderRadius: '0.25rem',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                        onMouseEnter={(e) => e.target.style.background = 'var(--primary)20'}
+                                                        onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                                        title="Mark as read"
+                                                    >
+                                                        <CheckCircle size={20} />
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => handleDelete(notification._id)}
+                                                    style={{
+                                                        background: 'transparent',
+                                                        border: 'none',
+                                                        cursor: 'pointer',
+                                                        color: '#EF4444',
+                                                        padding: '0.5rem',
+                                                        borderRadius: '0.25rem',
+                                                        transition: 'all 0.2s'
+                                                    }}
+                                                    onMouseEnter={(e) => e.target.style.background = '#EF444420'}
+                                                    onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                                    title="Delete"
+                                                >
+                                                    <Trash2 size={20} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </motion.div>
-                        );
-                    })
+                        ))}
+                    </AnimatePresence>
                 )}
-            </div>
+            </motion.div>
         </div>
     );
 }
