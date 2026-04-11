@@ -7,22 +7,35 @@ import AdminOrders from './sections/Orders';
 import AdminNotifications from './sections/Notifications';
 import AdminStock from './sections/Stock';
 import AdminReports from './sections/Reports';
+import AdminSettings from './sections/Settings';
 
 function AdminDashboard() {
     const [adminUsername, setAdminUsername] = useState('');
     const [activeSection, setActiveSection] = useState('dashboard');
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const navigate = useNavigate();
 
     useEffect(() => {
-        if (!localStorage.getItem('admin_token')) {
-            navigate('/login');
-            return;
+        try {
+            const token = localStorage.getItem('admin_token');
+            const username = localStorage.getItem('admin_username');
+            
+            console.log('AdminDashboard - Token:', token ? 'exists' : 'missing');
+            console.log('AdminDashboard - Username:', username);
+            
+            if (!token) {
+                console.log('No token found, redirecting to login');
+                navigate('/login');
+                return;
+            }
+            
+            setAdminUsername(username || 'Admin');
+            setLoading(false);
+        } catch (err) {
+            console.error('Error in AdminDashboard useEffect:', err);
+            setError(err.message);
         }
-        
-        const username = localStorage.getItem('admin_username');
-        setAdminUsername(username);
-        setLoading(false);
     }, [navigate]);
 
     const handleLogout = () => {
@@ -32,8 +45,22 @@ function AdminDashboard() {
         navigate('/login');
     };
 
+    if (error) {
+        return (
+            <div className="page" style={{ justifyContent: 'center', alignItems: 'center', background: '#ffbaba' }}>
+                <div className="card" style={{ maxWidth: '500px', padding: '2rem', background: 'white' }}>
+                    <h2 style={{ color: '#c1272d', marginBottom: '1rem' }}>Error</h2>
+                    <p style={{ color: '#666', marginBottom: '1rem' }}>{error}</p>
+                    <button className="btn btn-primary" onClick={() => window.location.href = '/login'}>
+                        Go to Login
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     if (loading) {
-        return <div className="page" style={{ justifyContent: 'center', alignItems: 'center' }}>Loading...</div>;
+        return <div className="page" style={{ justifyContent: 'center', alignItems: 'center' }}><h2>Loading Admin Dashboard...</h2></div>;
     }
 
     const sections = [
@@ -46,19 +73,26 @@ function AdminDashboard() {
     ];
 
     const renderSection = () => {
-        switch(activeSection) {
-            case 'dashboard':
-                return <AdminDashboardHome />;
-            case 'orders':
-                return <AdminOrders />;
-            case 'notifications':
-                return <AdminNotifications />;
-            case 'stock':
-                return <AdminStock />;
-            case 'reports':
-                return <AdminReports />;
-            default:
-                return <AdminDashboardHome />;
+        try {
+            switch(activeSection) {
+                case 'dashboard':
+                    return <AdminDashboardHome />;
+                case 'orders':
+                    return <AdminOrders />;
+                case 'notifications':
+                    return <AdminNotifications />;
+                case 'stock':
+                    return <AdminStock />;
+                case 'reports':
+                    return <AdminReports />;
+                case 'settings':
+                    return <AdminSettings />;
+                default:
+                    return <AdminDashboardHome />;
+            }
+        } catch (err) {
+            console.error('Error rendering section:', err);
+            return <div style={{ padding: '2rem', color: 'red' }}>Error loading section: {err.message}</div>;
         }
     };
 

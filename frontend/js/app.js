@@ -86,7 +86,7 @@ const downloadUpload = async (uploadId, filename) => {
       }
     }
 
-    // Optionally refresh search results if in sharelearn search
+  
     if (state.currentModule === 'sharelearn' && state.currentPage === 'search') {
       const btn = el('searchBtn');
       if (btn) btn.click();
@@ -693,23 +693,8 @@ const mountLogin = () => {
   if (adminLoginBtn) {
     adminLoginBtn.addEventListener('click', () => {
       console.log('Admin login button clicked');
-      const username = prompt('Admin username:', 'stationery-admin');
-      const password = prompt('Admin password:');
-      if (!username || !password) return;
-
-      request('/auth/admin/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password }),
-      })
-        .then((res) => {
-          console.log('Admin login response:', res);
-          setSession(res.token, { username: res.admin.username }, true);
-          navigate('home');
-        })
-        .catch((err) => {
-          console.error('Admin login error:', err);
-          showAlert(err.message, 'error');
-        });
+      // Redirect to React admin dashboard
+      window.location.href = '/admin-index.html';
     });
   }
 };
