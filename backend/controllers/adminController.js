@@ -257,6 +257,29 @@ const updateOrderStatus = async (req, res) => {
       );
     }
 
+    // Emit order status change event
+    if (global.io) {
+      // Notify the specific student
+      global.io.to(`student-${updatedOrder.studentId._id}`).emit('order-status-updated', {
+        orderId: updatedOrder._id,
+        orderNumber: updatedOrder.orderNumber,
+        status: updatedOrder.status,
+        remarks: updatedOrder.remarks,
+        updatedAt: updatedOrder.updatedAt,
+        statusHistory: updatedOrder.statusHistory
+      });
+
+      // Notify admin dashboard
+      global.io.to('admin-room').emit('order-status-changed', {
+        orderId: updatedOrder._id,
+        orderNumber: updatedOrder.orderNumber,
+        studentName: updatedOrder.studentId?.name || 'Unknown',
+        status: updatedOrder.status,
+        totalPrice: updatedOrder.totalPrice,
+        updatedAt: updatedOrder.updatedAt
+      });
+    }
+
     res.json({ message: 'Order status updated successfully', order: updatedOrder });
   } catch (error) {
     res.status(500).json({ message: 'Error updating order', error: error.message });
@@ -461,6 +484,106 @@ const deleteUpload = async (req, res) => {
   }
 };
 
+// ===== REPORTS =====
+const getDailySalesData = async (req, res) => {
+  try {
+    const { dateRange = 'month' } = req.query;
+
+    // Calculate date range
+    let startDate = new Date();
+    startDate.setUTCHours(0, 0, 0, 0);
+
+    if (dateRange === 'week') {
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (dateRange === 'month') {
+      startDate.setMonth(startDate.getMonth() - 1);
+    } else if (dateRange === 'quarter') {
+      startDate.setMonth(startDate.getMonth() - 3);
+    } else if (dateRange === 'year') {
+      startDate.setFullYear(startDate.getFullYear() - 1);
+    }
+
+    // Aggregate daily sales data
+    const dailySalesData = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate },
+          status: { $ne: 'Cancelled' }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
+          },
+          orders: { $sum: 1 },
+          revenue: { $sum: '$totalPrice' },
+          avgOrderValue: { $avg: '$totalPrice' }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Format dates for display (dd/mm or month day format)
+    const formattedData = dailySalesData.map(day => {
+      const date = new Date(day._id + 'T00:00:00Z');
+      return {
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        orders: day.orders,
+        revenue: Math.round(day.revenue),
+        avgOrderValue: Math.round(day.avgOrderValue)
+      };
+    });
+
+    res.json(formattedData);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching daily sales data', error: error.message });
+  }
+};
+
+const getTopSellingItems = async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+
+    // Aggregate top selling products
+    const topItems = await Order.aggregate([
+      { $match: { status: { $ne: 'Cancelled' } } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.productId',
+          name: { $first: '$items.name' },
+          unitsSold: { $sum: '$items.quantity' },
+          totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } },
+          avgPrice: { $avg: '$items.price' }
+        }
+      },
+      { $sort: { unitsSold: -1 } },
+      { $limit: parseInt(limit) }
+    ]);
+
+    // Calculate total units and market share
+    const totalUnits = topItems.reduce((sum, item) => sum + item.unitsSold, 0);
+    
+    const formattedItems = topItems.map(item => ({
+      productId: item._id,
+      name: item.name,
+      unitsSold: item.unitsSold,
+      revenue: Math.round(item.totalRevenue),
+      marketShare: totalUnits > 0 ? ((item.unitsSold / totalUnits) * 100).toFixed(1) : 0,
+      avgPrice: Math.round(item.avgPrice)
+    }));
+
+    res.json({
+      items: formattedItems,
+      totalUnits: totalUnits,
+      totalRevenue: Math.round(topItems.reduce((sum, item) => sum + item.totalRevenue, 0))
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching top selling items', error: error.message });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getAllOrders,
@@ -470,6 +593,8 @@ module.exports = {
   getInventory,
   updateStock,
   getStockAnalytics,
+  getDailySalesData,
+  getTopSellingItems,
   verifyUpload,
   deleteUpload
 };

@@ -1,18 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Edit2, Trash2, AlertTriangle } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Plus, Edit2, Trash2, AlertTriangle, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { api } from '../../../services/api';
 
-function AdminStock() {
-    const [stock, setStock] = useState([
-        { id: 1, name: 'Notebooks', quantity: 15, minStock: 20, price: 50, category: 'Stationery', lastUpdated: '2024-03-20' },
-        { id: 2, name: 'Pens', quantity: 45, minStock: 30, price: 10, category: 'Writing', lastUpdated: '2024-03-20' },
-        { id: 3, name: 'Erasers', quantity: 8, minStock: 15, price: 5, category: 'Stationery', lastUpdated: '2024-03-19' },
-        { id: 4, name: 'Pencils', quantity: 62, minStock: 40, price: 8, category: 'Writing', lastUpdated: '2024-03-20' },
-        { id: 5, name: 'A4 Sheets', quantity: 120, minStock: 100, price: 200, category: 'Paper', lastUpdated: '2024-03-20' }
-    ]);
-
+function AdminStock({ socketEvents = {} }) {
+    const [stock, setStock] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [showAddModal, setShowAddModal] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
+    const [saving, setSaving] = useState(false);
     const [formData, setFormData] = useState({
         name: '',
         quantity: '',
@@ -21,56 +18,142 @@ function AdminStock() {
         category: ''
     });
 
+    // Load products from database
+    useEffect(() => {
+        fetchProducts();
+    }, []);
+
+    // Refresh when real-time events occur
+    useEffect(() => {
+        if (socketEvents.stockUpdated) {
+            console.log('Stock updated via Socket.io, refreshing products');
+            fetchProducts();
+        }
+        if (socketEvents.newOrder) {
+            console.log('New order placed, refreshing products');
+            fetchProducts();
+        }
+    }, [socketEvents.stockUpdated, socketEvents.newOrder]);
+
+    const fetchProducts = async () => {
+        try {
+            setLoading(true);
+            const response = await api.getAdminProducts();
+            const products = Array.isArray(response.items) ? response.items : [];
+            
+            // Map database fields to component fields
+            const mappedProducts = products.map(p => ({
+                _id: p._id,
+                name: p.name,
+                category: p.category,
+                quantity: p.stock,
+                minStock: p.minStock || 10,
+                price: p.price,
+                image: p.image
+            }));
+            
+            setStock(mappedProducts);
+            setError(null);
+        } catch (err) {
+            console.error('Error fetching products:', err);
+            setError('Failed to load products');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const lowStockItems = stock.filter(item => item.quantity <= item.minStock);
 
     const handleAddNew = () => {
         setEditingItem(null);
-        setFormData({ name: '', quantity: '', minStock: '', price: '', category: '' });
+        setFormData({ name: '', quantity: '', minStock: '10', price: '', category: '' });
         setShowAddModal(true);
     };
 
     const handleEdit = (item) => {
         setEditingItem(item);
-        setFormData(item);
+        setFormData({
+            name: item.name,
+            quantity: item.quantity.toString(),
+            minStock: item.minStock.toString(),
+            price: item.price.toString(),
+            category: item.category
+        });
         setShowAddModal(true);
     };
 
-    const handleSave = () => {
-        if (!formData.name || !formData.quantity || !formData.price) {
+    const handleSave = async () => {
+        if (!formData.name || formData.quantity === '' || !formData.price) {
             alert('Please fill all required fields');
             return;
         }
 
-        if (editingItem) {
-            setStock(stock.map(item =>
-                item.id === editingItem.id
-                    ? { ...formData, id: item.id, lastUpdated: new Date().toISOString().split('T')[0] }
-                    : item
-            ));
-        } else {
-            setStock([...stock, {
-                ...formData,
-                id: stock.length + 1,
-                lastUpdated: new Date().toISOString().split('T')[0]
-            }]);
+        try {
+            setSaving(true);
+            
+            const productData = {
+                name: formData.name,
+                category: formData.category,
+                price: parseFloat(formData.price),
+                stock: parseInt(formData.quantity),
+                minStock: parseInt(formData.minStock) || 10
+            };
+
+            if (editingItem) {
+                // Update existing product
+                await api.updateAdminProduct(editingItem._id, productData);
+            } else {
+                // Create new product
+                await api.createAdminProduct(productData);
+            }
+
+            await fetchProducts();
+            setShowAddModal(false);
+        } catch (err) {
+            console.error('Error saving product:', err);
+            alert('Failed to save product: ' + (err.message || 'Unknown error'));
+        } finally {
+            setSaving(false);
         }
-
-        setShowAddModal(false);
     };
 
-    const handleDelete = (id) => {
-        if (confirm('Are you sure you want to delete this item?')) {
-            setStock(stock.filter(item => item.id !== id));
+    const handleDelete = async (item) => {
+        if (!confirm(`Are you sure you want to delete "${item.name}"?`)) return;
+
+        try {
+            setSaving(true);
+            await api.deleteAdminProduct(item._id);
+            await fetchProducts();
+        } catch (err) {
+            console.error('Error deleting product:', err);
+            alert('Failed to delete product: ' + (err.message || 'Unknown error'));
+        } finally {
+            setSaving(false);
         }
     };
 
-    const updateQuantity = (id, newQuantity) => {
-        setStock(stock.map(item =>
-            item.id === id
-                ? { ...item, quantity: newQuantity, lastUpdated: new Date().toISOString().split('T')[0] }
-                : item
-        ));
+    const handleQuickUpdate = async (itemId, newQuantity, newMinStock) => {
+        try {
+            await api.updateAdminProduct(itemId, {
+                stock: parseInt(newQuantity),
+                minStock: parseInt(newMinStock) || 10
+            });
+            await fetchProducts();
+        } catch (err) {
+            console.error('Error updating stock:', err);
+            alert('Failed to update stock');
+        }
     };
+
+    if (loading) {
+        return (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                <div style={{ textAlign: 'center' }}>
+                    <p style={{ color: 'var(--text-muted)' }}>Loading stock items...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -90,35 +173,58 @@ function AdminStock() {
                 </button>
             </div>
 
-            {/* Low Stock Alert */}
-            {lowStockItems.length > 0 && (
+            {/* Error Alert */}
+            {error && (
                 <div style={{
                     padding: '1rem',
-                    background: '#FEF2F2',
-                    border: '1px solid #FECACA',
+                    background: '#FEE2E2',
+                    border: '1px solid #FCA5A5',
                     borderRadius: '0.5rem',
                     color: '#991B1B',
                     display: 'flex',
-                    alignItems: 'flex-start',
+                    alignItems: 'center',
                     gap: '0.75rem'
                 }}>
+                    <AlertCircle size={20} />
+                    <p style={{ margin: 0 }}>{error}</p>
+                </div>
+            )}
+
+            {/* Low Stock Alert */}
+            {lowStockItems.length > 0 && (
+                <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    style={{
+                        padding: '1rem',
+                        background: '#FEF2F2',
+                        border: '1px solid #FECACA',
+                        borderRadius: '0.5rem',
+                        color: '#991B1B',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '0.75rem'
+                    }}
+                >
                     <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: '0.125rem' }} />
                     <div>
                         <strong>Low Stock Alert!</strong>
                         <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem' }}>
                             {lowStockItems.length} item{lowStockItems.length > 1 ? 's' : ''} {lowStockItems.length > 1 ? 'are' : 'is'} below minimum stock level:
-                            {lowStockItems.map(item => ` ${item.name}`).join(',')}
+                            {lowStockItems.map(item => ` ${item.name}`).join(', ')}
                         </p>
                     </div>
-                </div>
+                </motion.div>
             )}
 
             {/* Stock Table */}
-            <div className="card" style={{ padding: '1.5rem', overflowX: 'auto' }}>
+            <motion.div className="card" style={{ padding: '1.5rem', overflowX: 'auto' }}>
                 <h3 style={{ marginTop: 0 }}>Current Stock Levels</h3>
 
                 {stock.length === 0 ? (
-                    <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No stock items</p>
+                    <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
+                        No stock items. <button onClick={handleAddNew} style={{ cursor: 'pointer', color: 'var(--primary)', border: 'none', background: 'none', textDecoration: 'underline' }}>Add first item</button>
+                    </p>
                 ) : (
                     <table style={{
                         width: '100%',
@@ -129,193 +235,250 @@ function AdminStock() {
                             <tr style={{ borderBottom: '2px solid var(--border)' }}>
                                 <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Item Name</th>
                                 <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Category</th>
-                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Quantity</th>
-                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Min Stock</th>
-                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Price</th>
-                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Status</th>
-                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Actions</th>
+                                <th style={{ textAlign: 'center', padding: '0.75rem', fontWeight: '600' }}>Quantity</th>
+                                <th style={{ textAlign: 'center', padding: '0.75rem', fontWeight: '600' }}>Min Stock</th>
+                                <th style={{ textAlign: 'right', padding: '0.75rem', fontWeight: '600' }}>Price</th>
+                                <th style={{ textAlign: 'center', padding: '0.75rem', fontWeight: '600' }}>Status</th>
+                                <th style={{ textAlign: 'center', padding: '0.75rem', fontWeight: '600' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {stock.map((item, index) => {
-                                const isLowStock = item.quantity <= item.minStock;
-                                return (
-                                    <motion.tr
-                                        key={item.id}
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ delay: index * 0.05 }}
-                                        style={{
-                                            borderBottom: '1px solid var(--border)',
-                                            background: isLowStock ? 'rgba(239, 68, 68, 0.05)' : 'transparent'
-                                        }}
-                                    >
-                                        <td style={{ padding: '0.75rem', fontWeight: '500' }}>{item.name}</td>
-                                        <td style={{ padding: '0.75rem' }}>{item.category}</td>
-                                        <td style={{ padding: '0.75rem' }}>
-                                            <input
-                                                type="number"
-                                                value={item.quantity}
-                                                onChange={(e) => updateQuantity(item.id, parseInt(e.target.value))}
-                                                style={{
-                                                    width: '60px',
-                                                    padding: '0.25rem',
-                                                    border: '1px solid var(--border)',
-                                                    borderRadius: '0.25rem'
-                                                }}
-                                            />
-                                        </td>
-                                        <td style={{ padding: '0.75rem' }}>{item.minStock}</td>
-                                        <td style={{ padding: '0.75rem' }}>₹{item.price}</td>
-                                        <td style={{ padding: '0.75rem' }}>
-                                            <span style={{
-                                                display: 'inline-block',
-                                                padding: '0.25rem 0.75rem',
-                                                background: isLowStock ? '#FEE2E2' : '#DBEAFE',
-                                                color: isLowStock ? '#991B1B' : '#0284C7',
-                                                borderRadius: '9999px',
-                                                fontSize: '0.75rem',
-                                                fontWeight: '600'
-                                            }}>
-                                                {isLowStock ? 'Low' : 'OK'}
-                                            </span>
-                                        </td>
-                                        <td style={{ padding: '0.75rem' }}>
-                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                                <button
-                                                    onClick={() => handleEdit(item)}
-                                                    style={{
-                                                        background: 'none',
-                                                        border: 'none',
-                                                        cursor: 'pointer',
-                                                        color: 'var(--primary)',
-                                                        padding: '0.25rem'
+                            <AnimatePresence>
+                                {stock.map((item, index) => {
+                                    const isLowStock = item.quantity <= item.minStock;
+                                    return (
+                                        <motion.tr
+                                            key={item._id}
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            exit={{ opacity: 0 }}
+                                            transition={{ delay: index * 0.02 }}
+                                            style={{
+                                                borderBottom: '1px solid var(--border)',
+                                                background: isLowStock ? 'rgba(239, 68, 68, 0.05)' : 'transparent'
+                                            }}
+                                        >
+                                            <td style={{ padding: '0.75rem', fontWeight: '500' }}>{item.name}</td>
+                                            <td style={{ padding: '0.75rem' }}>{item.category || 'General'}</td>
+                                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                                                <input
+                                                    type="number"
+                                                    value={item.quantity}
+                                                    onChange={(e) => {
+                                                        const newVal = parseInt(e.target.value);
+                                                        setStock(stock.map(s => s._id === item._id ? { ...s, quantity: newVal } : s));
                                                     }}
-                                                    title="Edit"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(item.id)}
+                                                    onBlur={() => handleQuickUpdate(item._id, item.quantity, item.minStock)}
                                                     style={{
-                                                        background: 'none',
-                                                        border: 'none',
-                                                        cursor: 'pointer',
-                                                        color: '#EF4444',
-                                                        padding: '0.25rem'
+                                                        width: '70px',
+                                                        padding: '0.4rem',
+                                                        border: '1px solid var(--border)',
+                                                        borderRadius: '0.25rem',
+                                                        textAlign: 'center'
                                                     }}
-                                                    title="Delete"
+                                                />
+                                            </td>
+                                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                                                <input
+                                                    type="number"
+                                                    value={item.minStock}
+                                                    onChange={(e) => {
+                                                        const newVal = parseInt(e.target.value);
+                                                        setStock(stock.map(s => s._id === item._id ? { ...s, minStock: newVal } : s));
+                                                    }}
+                                                    onBlur={() => handleQuickUpdate(item._id, item.quantity, item.minStock)}
+                                                    style={{
+                                                        width: '70px',
+                                                        padding: '0.4rem',
+                                                        border: '1px solid var(--border)',
+                                                        borderRadius: '0.25rem',
+                                                        textAlign: 'center'
+                                                    }}
+                                                />
+                                            </td>
+                                            <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '500' }}>₹{item.price}</td>
+                                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                                                <motion.span
+                                                    layout
+                                                    style={{
+                                                        display: 'inline-block',
+                                                        padding: '0.25rem 0.75rem',
+                                                        background: isLowStock ? '#FEE2E2' : '#DBEAFE',
+                                                        color: isLowStock ? '#991B1B' : '#0284C7',
+                                                        borderRadius: '9999px',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: '600'
+                                                    }}
                                                 >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </motion.tr>
-                                );
-                            })}
+                                                    {isLowStock ? 'Low' : 'OK'}
+                                                </motion.span>
+                                            </td>
+                                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>
+                                                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                                                    <button
+                                                        onClick={() => handleEdit(item)}
+                                                        disabled={saving}
+                                                        style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            cursor: saving ? 'not-allowed' : 'pointer',
+                                                            color: 'var(--primary)',
+                                                            padding: '0.25rem',
+                                                            opacity: saving ? 0.5 : 1
+                                                        }}
+                                                        title="Edit"
+                                                    >
+                                                        <Edit2 size={16} />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(item)}
+                                                        disabled={saving}
+                                                        style={{
+                                                            background: 'none',
+                                                            border: 'none',
+                                                            cursor: saving ? 'not-allowed' : 'pointer',
+                                                            color: '#EF4444',
+                                                            padding: '0.25rem',
+                                                            opacity: saving ? 0.5 : 1
+                                                        }}
+                                                        title="Delete"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </motion.tr>
+                                    );
+                                })}
+                            </AnimatePresence>
                         </tbody>
                     </table>
                 )}
-            </div>
+            </motion.div>
 
             {/* Add/Edit Modal */}
-            {showAddModal && (
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    background: 'rgba(0,0,0,0.5)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 1000
-                }}>
+            <AnimatePresence>
+                {showAddModal && (
                     <motion.div
-                        className="card"
-                        initial={{ scale: 0.9, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
                         style={{
-                            maxWidth: '500px',
-                            width: '90%',
-                            padding: '2rem'
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            background: 'rgba(0,0,0,0.5)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 1000
                         }}
+                        onClick={() => !saving && setShowAddModal(false)}
                     >
-                        <h2 style={{ marginTop: 0 }}>
-                            {editingItem ? 'Edit Item' : 'Add New Item'}
-                        </h2>
+                        <motion.div
+                            className="card"
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            style={{
+                                maxWidth: '500px',
+                                width: '90%',
+                                padding: '2rem'
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h2 style={{ marginTop: 0 }}>
+                                {editingItem ? 'Edit Item' : 'Add New Item'}
+                            </h2>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                            <div>
-                                <label className="input-label">Item Name *</label>
-                                <input
-                                    type="text"
-                                    className="input"
-                                    value={formData.name}
-                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    placeholder="e.g. Notebooks"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="input-label">Category</label>
-                                <input
-                                    type="text"
-                                    className="input"
-                                    value={formData.category}
-                                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                    placeholder="e.g. Stationery"
-                                />
-                            </div>
-
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                 <div>
-                                    <label className="input-label">Quantity *</label>
+                                    <label className="input-label">Item Name *</label>
                                     <input
-                                        type="number"
+                                        type="text"
                                         className="input"
-                                        value={formData.quantity}
-                                        onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) })}
-                                        placeholder="0"
+                                        value={formData.name}
+                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                        placeholder="e.g. Notebooks"
+                                        disabled={saving}
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="input-label">Min Stock</label>
+                                    <label className="input-label">Category</label>
+                                    <input
+                                        type="text"
+                                        className="input"
+                                        value={formData.category}
+                                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                                        placeholder="e.g. Stationery"
+                                        disabled={saving}
+                                    />
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                    <div>
+                                        <label className="input-label">Quantity (Stock) *</label>
+                                        <input
+                                            type="number"
+                                            className="input"
+                                            value={formData.quantity}
+                                            onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                                            placeholder="0"
+                                            disabled={saving}
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="input-label">Min Stock Alert</label>
+                                        <input
+                                            type="number"
+                                            className="input"
+                                            value={formData.minStock}
+                                            onChange={(e) => setFormData({ ...formData, minStock: e.target.value })}
+                                            placeholder="10"
+                                            disabled={saving}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="input-label">Price (₹) *</label>
                                     <input
                                         type="number"
                                         className="input"
-                                        value={formData.minStock}
-                                        onChange={(e) => setFormData({ ...formData, minStock: parseInt(e.target.value) })}
+                                        value={formData.price}
+                                        onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                                         placeholder="0"
+                                        disabled={saving}
                                     />
                                 </div>
-                            </div>
 
-                            <div>
-                                <label className="input-label">Price (₹) *</label>
-                                <input
-                                    type="number"
-                                    className="input"
-                                    value={formData.price}
-                                    onChange={(e) => setFormData({ ...formData, price: parseInt(e.target.value) })}
-                                    placeholder="0"
-                                />
+                                <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                                    <button
+                                        onClick={() => setShowAddModal(false)}
+                                        className="btn"
+                                        disabled={saving}
+                                        style={{ opacity: saving ? 0.5 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleSave}
+                                        className="btn btn-primary"
+                                        disabled={saving}
+                                        style={{ opacity: saving ? 0.5 : 1, cursor: saving ? 'not-allowed' : 'pointer' }}
+                                    >
+                                        {saving ? 'Saving...' : editingItem ? 'Update' : 'Create'}
+                                    </button>
+                                </div>
                             </div>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
-                            <button className="btn btn-primary" onClick={handleSave}>
-                                {editingItem ? 'Update' : 'Add'} Item
-                            </button>
-                            <button className="btn btn-secondary" onClick={() => setShowAddModal(false)}>
-                                Cancel
-                            </button>
-                        </div>
+                        </motion.div>
                     </motion.div>
-                </div>
-            )}
+                )}
+            </AnimatePresence>
         </div>
     );
 }

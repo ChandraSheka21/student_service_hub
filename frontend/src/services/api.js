@@ -200,5 +200,54 @@ export const api = {
             headers: getAuthHeader()
         });
         return res.json();
+    },
+
+    // Products (Admin)
+    getAdminProducts: async (filters = {}) => {
+        const params = new URLSearchParams();
+        if (filters.search) params.append('search', filters.search);
+        if (filters.category) params.append('category', filters.category);
+        if (filters.sort) params.append('sort', filters.sort);
+        
+        const query = params.toString() ? `?${params.toString()}` : '';
+        const res = await fetch(`${BASE_URL}/products${query}`);
+        return res.json();
+    },
+    createAdminProduct: async (productData) => {
+        const res = await fetch(`${BASE_URL}/products`, {
+            method: 'POST',
+            headers: getAuthHeader(),
+            body: JSON.stringify(productData)
+        });
+        return res.json();
+    },
+    updateAdminProduct: async (productId, productData) => {
+        const res = await fetch(`${BASE_URL}/products/${productId}`, {
+            method: 'PUT',
+            headers: getAuthHeader(),
+            body: JSON.stringify(productData)
+        });
+        return res.json();
+    },
+    deleteAdminProduct: async (productId) => {
+        const res = await fetch(`${BASE_URL}/products/${productId}`, {
+            method: 'DELETE',
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+
+    // Reports
+    getDailySalesData: async (dateRange = 'month') => {
+        const res = await fetch(`${BASE_URL}/admin/reports/daily-sales?dateRange=${dateRange}`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
+    },
+    getTopSellingItems: async (limit = 5) => {
+        const res = await fetch(`${BASE_URL}/admin/reports/top-items?limit=${limit}`, {
+            headers: getAuthHeader()
+        });
+        return res.json();
     }
 };

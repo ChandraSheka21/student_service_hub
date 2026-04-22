@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const connectDB = require('./config/db');
 const { authMiddleware, requireStudent, requireAdmin } = require('./middleware/authMiddleware');
@@ -13,6 +15,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 
 const Admin = require('./models/Admin');
 const { seedProducts } = require('./utils/seedData');
@@ -35,13 +38,10 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/notifications', notificationRoutes);
 
-// Notifications (student)
-const { getNotifications } = require('./utils/notificationHelper');
-app.get('/api/notifications', authMiddleware, requireStudent, (req, res) => {
-  const list = getNotifications(req.student._id);
-  res.json(list);
-});
+// Notifications are now handled by notificationRoutes
+// See /api/notifications
 
 // Serve static frontend
 const frontendPath = path.join(__dirname, '..', 'frontend');
@@ -68,7 +68,41 @@ const start = async () => {
   await seedAdmin();
   await seedProducts();
 
-  app.listen(PORT, () => {
+  // Create HTTP server and Socket.io
+  const httpServer = http.createServer(app);
+  const io = new Server(httpServer, {
+    cors: {
+      origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000', 'http://localhost:3001'],
+      methods: ['GET', 'POST'],
+      credentials: true
+    }
+  });
+
+  // Make io accessible globally
+  global.io = io;
+
+  // Socket.io connection handling
+  io.on('connection', (socket) => {
+    console.log(`✅ Client connected: ${socket.id}`);
+
+    // Rooms: different students connect to their own room
+    socket.on('join-student-room', (studentId) => {
+      socket.join(`student-${studentId}`);
+      console.log(`Student ${studentId} joined their room`);
+    });
+
+    // Admin connects to admin room
+    socket.on('join-admin-room', () => {
+      socket.join('admin-room');
+      console.log(`Admin ${socket.id} joined admin room`);
+    });
+
+    socket.on('disconnect', () => {
+      console.log(`❌ Client disconnected: ${socket.id}`);
+    });
+  });
+
+  httpServer.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
 };

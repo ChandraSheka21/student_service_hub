@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, Trash2, CheckCircle, BarChart3, Package, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../../../services/api';
+import * as api from '../../../services/api';
 
-function AdminNotifications() {
+function AdminNotifications({ socketEvents = {} }) {
     const [notifications, setNotifications] = useState([]);
     const [filteredNotifications, setFilteredNotifications] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -12,13 +12,28 @@ function AdminNotifications() {
 
     useEffect(() => {
         fetchNotifications();
-        const interval = setInterval(fetchNotifications, 15000);
-        return () => clearInterval(interval);
     }, []);
 
     useEffect(() => {
         applyFilter();
     }, [notifications, filter]);
+
+    // Real-time socket.io event listeners
+    useEffect(() => {
+        if (socketEvents.newOrder) {
+            // New order received - increment unread count
+            setUnreadCount(prev => Math.max(0, prev + 1));
+            fetchNotifications();
+        }
+    }, [socketEvents.newOrder]);
+
+    useEffect(() => {
+        if (socketEvents.lowStockAlert) {
+            // Low stock alert - increment unread count
+            setUnreadCount(prev => Math.max(0, prev + 1));
+            fetchNotifications();
+        }
+    }, [socketEvents.lowStockAlert]);
 
     const fetchNotifications = async () => {
         try {
@@ -57,6 +72,7 @@ function AdminNotifications() {
             setNotifications(notifications.map(n =>
                 n._id === notificationId ? { ...n, read: true, readAt: new Date() } : n
             ));
+            setUnreadCount(prev => Math.max(0, prev - 1));
         } catch (err) {
             console.error('Error marking notification:', err);
         }
@@ -66,6 +82,7 @@ function AdminNotifications() {
         try {
             await api.markAllNotificationsRead();
             setNotifications(notifications.map(n => ({ ...n, read: true, readAt: new Date() })));
+            setUnreadCount(0);
         } catch (err) {
             console.error('Error marking all notifications:', err);
         }
@@ -78,7 +95,7 @@ function AdminNotifications() {
         } catch (err) {
             console.error('Error deleting notification:', err);
         }
-    };
+    };  
 
     const getNotificationIcon = (type) => {
         if (type?.includes('order')) return <Package size={20} color="#3B82F6" />;
@@ -186,7 +203,7 @@ function AdminNotifications() {
                 ))}
             </motion.div>
 
-            {/* Notifications List */}
+            {/* Notifications List with Categories */}
             <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -224,119 +241,217 @@ function AdminNotifications() {
                         )}
                     </div>
                 ) : (
-                    <AnimatePresence>
-                        {filteredNotifications.map((notification, index) => (
-                            <motion.div
-                                key={notification._id}
-                                initial={{ opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -20 }}
-                                transition={{ delay: index * 0.05 }}
-                                className="card"
-                                style={{
-                                    padding: '1.5rem',
-                                    marginBottom: '1rem',
-                                    borderLeft: `4px solid ${getNotificationBorderColor(notification.type)}`,
-                                    background: getNotificationColor(notification.type),
-                                    opacity: notification.read ? 0.7 : 1
-                                }}
-                            >
-                                <div style={{
-                                    display: 'flex',
-                                    alignItems: 'flex-start',
-                                    gap: '1rem'
-                                }}>
-                                    {/* Icon */}
-                                    <div style={{
-                                        flexShrink: 0,
-                                        marginTop: '0.25rem'
-                                    }}>
-                                        {getNotificationIcon(notification.type)}
-                                    </div>
-
-                                    {/* Content */}
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{
-                                            display: 'flex',
-                                            alignItems: 'flex-start',
-                                            justifyContent: 'space-between',
-                                            gap: '1rem'
-                                        }}>
-                                            <div>
-                                                <h4 style={{
-                                                    margin: 0,
-                                                    marginBottom: '0.25rem',
-                                                    fontSize: '1rem',
-                                                    fontWeight: '600'
-                                                }}>
-                                                    {notification.title}
-                                                </h4>
-                                                <p style={{
-                                                    margin: '0.5rem 0 0 0',
-                                                    fontSize: '0.9rem',
-                                                    color: 'var(--text)',
-                                                    lineHeight: '1.5'
-                                                }}>
-                                                    {notification.message}
-                                                </p>
-                                                <p style={{
-                                                    margin: '0.75rem 0 0 0',
-                                                    fontSize: '0.8rem',
-                                                    color: 'var(--text-muted)'
-                                                }}>
-                                                    {new Date(notification.createdAt).toLocaleString()}
-                                                </p>
-                                            </div>
-
-                                            {/* Actions */}
+                    <div>
+                        {/* Order Notifications Section */}
+                        {filteredNotifications.some(n => n.type?.includes('order')) && (
+                            <div style={{ marginBottom: '2rem' }}>
+                                <h3 style={{ margin: '0 0 1rem 0', color: '#3B82F6', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <Package size={20} /> Order Notifications
+                                </h3>
+                                <AnimatePresence>
+                                    {filteredNotifications.filter(n => n.type?.includes('order')).map((notification, index) => (
+                                        <motion.div
+                                            key={notification._id}
+                                            initial={{ opacity: 0, x: -20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            exit={{ opacity: 0, x: -20 }}
+                                            transition={{ delay: index * 0.05 }}
+                                            className="card"
+                                            style={{
+                                                padding: '1.5rem',
+                                                marginBottom: '1rem',
+                                                borderLeft: '4px solid #3B82F6',
+                                                background: '#DBEAFE',
+                                                opacity: notification.read ? 0.7 : 1
+                                            }}
+                                        >
                                             <div style={{
                                                 display: 'flex',
-                                                gap: '0.5rem',
-                                                flexShrink: 0
+                                                alignItems: 'flex-start',
+                                                gap: '1rem'
                                             }}>
-                                                {!notification.read && (
+                                                <div style={{ flexShrink: 0, marginTop: '0.25rem' }}>
+                                                    <Package size={20} color="#3B82F6" />
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <h4 style={{
+                                                        margin: 0,
+                                                        marginBottom: '0.25rem',
+                                                        fontSize: '1rem',
+                                                        fontWeight: '600'
+                                                    }}>
+                                                        {notification.title}
+                                                    </h4>
+                                                    <p style={{
+                                                        margin: '0.5rem 0 0 0',
+                                                        fontSize: '0.9rem',
+                                                        color: 'var(--text)',
+                                                        lineHeight: '1.5'
+                                                    }}>
+                                                        {notification.message}
+                                                    </p>
+                                                    <p style={{
+                                                        margin: '0.75rem 0 0 0',
+                                                        fontSize: '0.8rem',
+                                                        color: 'var(--text-muted)'
+                                                    }}>
+                                                        {new Date(notification.createdAt).toLocaleString()}
+                                                    </p>
+                                                </div>
+                                                <div style={{
+                                                    display: 'flex',
+                                                    gap: '0.5rem',
+                                                    flexShrink: 0
+                                                }}>
+                                                    {!notification.read && (
+                                                        <button
+                                                            onClick={() => handleMarkAsRead(notification._id)}
+                                                            style={{
+                                                                background: 'transparent',
+                                                                border: 'none',
+                                                                cursor: 'pointer',
+                                                                color: 'var(--primary)',
+                                                                padding: '0.5rem',
+                                                                borderRadius: '0.25rem',
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            onMouseEnter={(e) => e.target.style.background = 'var(--primary)20'}
+                                                            onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                                            title="Mark as read"
+                                                        >
+                                                            <CheckCircle size={20} />
+                                                        </button>
+                                                    )}
                                                     <button
-                                                        onClick={() => handleMarkAsRead(notification._id)}
+                                                        onClick={() => handleDelete(notification._id)}
                                                         style={{
                                                             background: 'transparent',
                                                             border: 'none',
                                                             cursor: 'pointer',
-                                                            color: 'var(--primary)',
+                                                            color: '#EF4444',
                                                             padding: '0.5rem',
                                                             borderRadius: '0.25rem',
                                                             transition: 'all 0.2s'
                                                         }}
-                                                        onMouseEnter={(e) => e.target.style.background = 'var(--primary)20'}
+                                                        onMouseEnter={(e) => e.target.style.background = '#EF444420'}
                                                         onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                                                        title="Mark as read"
+                                                        title="Delete"
                                                     >
-                                                        <CheckCircle size={20} />
+                                                        <Trash2 size={20} />
                                                     </button>
-                                                )}
-                                                <button
-                                                    onClick={() => handleDelete(notification._id)}
-                                                    style={{
-                                                        background: 'transparent',
-                                                        border: 'none',
-                                                        cursor: 'pointer',
-                                                        color: '#EF4444',
-                                                        padding: '0.5rem',
-                                                        borderRadius: '0.25rem',
-                                                        transition: 'all 0.2s'
-                                                    }}
-                                                    onMouseEnter={(e) => e.target.style.background = '#EF444420'}
-                                                    onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                                                    title="Delete"
-                                                >
-                                                    <Trash2 size={20} />
-                                                </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        ))}
-                    </AnimatePresence>
+                                        </motion.div>
+                                    ))}
+                                </AnimatePresence>
+                            </div>
+                        )}
+
+                        {/* Stock Alerts Section */}
+                        {filteredNotifications.some(n => n.type?.includes('stock')) && (
+                            <div>
+                                <h3 style={{ margin: '0 0 1rem 0', color: '#F59E0B', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <BarChart3 size={20} /> Stock Alerts
+                                </h3>
+                                <AnimatePresence>
+                                    {filteredNotifications.filter(n => n.type?.includes('stock')).map((notification, index) => (
+                                        <motion.div
+                                            key={notification._id}
+                                            initial={{ opacity: 0, x: -20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            exit={{ opacity: 0, x: -20 }}
+                                            transition={{ delay: index * 0.05 }}
+                                            className="card"
+                                            style={{
+                                                padding: '1.5rem',
+                                                marginBottom: '1rem',
+                                                borderLeft: '4px solid #F59E0B',
+                                                background: '#FEF3C7',
+                                                opacity: notification.read ? 0.7 : 1
+                                            }}
+                                        >
+                                            <div style={{
+                                                display: 'flex',
+                                                alignItems: 'flex-start',
+                                                gap: '1rem'
+                                            }}>
+                                                <div style={{ flexShrink: 0, marginTop: '0.25rem' }}>
+                                                    <AlertCircle size={20} color="#F59E0B" />
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <h4 style={{
+                                                        margin: 0,
+                                                        marginBottom: '0.25rem',
+                                                        fontSize: '1rem',
+                                                        fontWeight: '600'
+                                                    }}>
+                                                        {notification.title}
+                                                    </h4>
+                                                    <p style={{
+                                                        margin: '0.5rem 0 0 0',
+                                                        fontSize: '0.9rem',
+                                                        color: 'var(--text)',
+                                                        lineHeight: '1.5'
+                                                    }}>
+                                                        {notification.message}
+                                                    </p>
+                                                    <p style={{
+                                                        margin: '0.75rem 0 0 0',
+                                                        fontSize: '0.8rem',
+                                                        color: 'var(--text-muted)'
+                                                    }}>
+                                                        {new Date(notification.createdAt).toLocaleString()}
+                                                    </p>
+                                                </div>
+                                                <div style={{
+                                                    display: 'flex',
+                                                    gap: '0.5rem',
+                                                    flexShrink: 0
+                                                }}>
+                                                    {!notification.read && (
+                                                        <button
+                                                            onClick={() => handleMarkAsRead(notification._id)}
+                                                            style={{
+                                                                background: 'transparent',
+                                                                border: 'none',
+                                                                cursor: 'pointer',
+                                                                color: 'var(--primary)',
+                                                                padding: '0.5rem',
+                                                                borderRadius: '0.25rem',
+                                                                transition: 'all 0.2s'
+                                                            }}
+                                                            onMouseEnter={(e) => e.target.style.background = 'var(--primary)20'}
+                                                            onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                                            title="Mark as read"
+                                                        >
+                                                            <CheckCircle size={20} />
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleDelete(notification._id)}
+                                                        style={{
+                                                            background: 'transparent',
+                                                            border: 'none',
+                                                            cursor: 'pointer',
+                                                            color: '#EF4444',
+                                                            padding: '0.5rem',
+                                                            borderRadius: '0.25rem',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                        onMouseEnter={(e) => e.target.style.background = '#EF444420'}
+                                                        onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                                        title="Delete"
+                                                    >
+                                                        <Trash2 size={20} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    ))}
+                                </AnimatePresence>
+                            </div>
+                        )}
+                    </div>
                 )}
             </motion.div>
         </div>

@@ -3,7 +3,7 @@ import { Search, Filter, Eye, ChevronDown, AlertCircle, Clock } from 'lucide-rea
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../../services/api';
 
-function AdminOrders() {
+function AdminOrders({ socketEvents = {} }) {
     const [orders, setOrders] = useState([]);
     const [filteredOrders, setFilteredOrders] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -20,11 +20,21 @@ function AdminOrders() {
     // Status Update State
     const [updatingStatus, setUpdatingStatus] = useState(false);
 
+    // Mark all notifications as read when user opens Orders section
     useEffect(() => {
         fetchOrders();
         const interval = setInterval(fetchOrders, 30000);
+        markOrderNotificationsAsRead();
         return () => clearInterval(interval);
     }, []);
+
+    // Refresh when real-time events occur
+    useEffect(() => {
+        if (socketEvents.newOrder || socketEvents.orderStatusChanged) {
+            console.log('Order event detected, refreshing orders list');
+            fetchOrders();
+        }
+    }, [socketEvents.newOrder, socketEvents.orderStatusChanged]);
 
     useEffect(() => {
         filterOrders();
@@ -41,6 +51,15 @@ function AdminOrders() {
             setError('Failed to load orders');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const markOrderNotificationsAsRead = async () => {
+        try {
+            // Mark all order-related notifications as read
+            await api.markAllNotificationsRead();
+        } catch (err) {
+            console.error('Error marking notifications as read:', err);
         }
     };
 

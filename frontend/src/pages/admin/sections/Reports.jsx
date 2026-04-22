@@ -1,31 +1,128 @@
 import React, { useEffect, useState } from 'react';
-import { BarChart3, TrendingUp, Download, Calendar } from 'lucide-react';
+import { BarChart3, TrendingUp, Download, Calendar, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { api } from '../../../services/api';
 
-function AdminReports() {
+function AdminReports({ socketEvents = {} }) {
     const [reportType, setReportType] = useState('sales');
     const [dateRange, setDateRange] = useState('month');
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    
+    // Sales data state
+    const [salesData, setSalesData] = useState([]);
+    const [topItems, setTopItems] = useState([]);
+    
+    // Computed metrics
+    const [totalRevenue, setTotalRevenue] = useState(0);
+    const [totalOrders, setTotalOrders] = useState(0);
+    const [averageOrderValue, setAverageOrderValue] = useState(0);
 
-    const salesData = [
-        { date: 'Mar 15', orders: 12, revenue: 6000 },
-        { date: 'Mar 16', orders: 18, revenue: 9200 },
-        { date: 'Mar 17', orders: 15, revenue: 7500 },
-        { date: 'Mar 18', orders: 22, revenue: 11000 },
-        { date: 'Mar 19', orders: 19, revenue: 9500 },
-        { date: 'Mar 20', orders: 24, revenue: 12500 }
-    ];
+    // Fetch sales data from API
+    const fetchSalesData = async () => {
+        try {
+            setLoading(true);
+            const response = await api.getDailySalesData(dateRange);
+            if (response && Array.isArray(response)) {
+                setSalesData(response);
+                
+                // Compute metrics
+                const revenue = response.reduce((sum, day) => sum + day.revenue, 0);
+                const orders = response.reduce((sum, day) => sum + day.orders, 0);
+                
+                setTotalRevenue(revenue);
+                setTotalOrders(orders);
+                setAverageOrderValue(orders > 0 ? Math.round(revenue / orders) : 0);
+            }
+            setError(null);
+        } catch (err) {
+            console.error('Error fetching sales data:', err);
+            setError('Failed to load sales data');
+        } finally {
+            setLoading(false);
+        }
+    };
 
-    const topItems = [
-        { name: 'Notebooks', sold: 156, revenue: 7800 },
-        { name: 'Pens', sold: 342, revenue: 3420 },
-        { name: 'A4 Sheets', sold: 98, revenue: 19600 },
-        { name: 'Erasers', sold: 287, revenue: 1435 },
-        { name: 'Pencils', sold: 205, revenue: 1640 }
-    ];
+    // Fetch top items data from API
+    const fetchTopItems = async () => {
+        try {
+            const response = await api.getTopSellingItems(5);
+            if (response && response.items) {
+                setTopItems(response.items);
+            }
+            setError(null);
+        } catch (err) {
+            console.error('Error fetching top items:', err);
+            setError('Failed to load top items');
+        }
+    };
 
-    const totalRevenue = salesData.reduce((sum, day) => sum + day.revenue, 0);
-    const totalOrders = salesData.reduce((sum, day) => sum + day.orders, 0);
-    const averageOrderValue = totalRevenue / totalOrders;
+    // Initial load
+    useEffect(() => {
+        fetchSalesData();
+        fetchTopItems();
+    }, []);
+
+    // Refetch when date range changes
+    useEffect(() => {
+        fetchSalesData();
+    }, [dateRange]);
+
+    // Real-time updates when orders change
+    useEffect(() => {
+        if (socketEvents?.newOrder || socketEvents?.orderStatusChanged || socketEvents?.orderCancelled) {
+            console.log('Order event detected, refreshing reports...');
+            // Debounce the refresh to avoid multiple calls
+            const timer = setTimeout(() => {
+                fetchSalesData();
+                fetchTopItems();
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [socketEvents?.newOrder, socketEvents?.orderStatusChanged, socketEvents?.orderCancelled]);
+
+    const handleExportReport = () => {
+        // Generate CSV
+        const headers = ['Date', 'Orders', 'Revenue', 'Avg Order Value'];
+        const rows = salesData.map(day => [day.date, day.orders, day.revenue, day.avgOrderValue]);
+        
+        let csv = headers.join(',') + '\n';
+        rows.forEach(row => {
+            csv += row.join(',') + '\n';
+        });
+
+        // Download
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sales-report-${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    };
+
+    if (error && salesData.length === 0 && topItems.length === 0) {
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div className="card" style={{
+                    padding: '2rem',
+                    border: '1px solid #EF4444',
+                    background: '#FEE2E2',
+                    borderRadius: '0.5rem'
+                }}>
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                        <AlertCircle size={24} color="#EF4444" style={{ flexShrink: 0 }} />
+                        <div>
+                            <h4 style={{ margin: 0, marginBottom: '0.5rem', color: '#DC2626' }}>Error Loading Reports</h4>
+                            <p style={{ margin: 0, color: '#991B1B', fontSize: '0.9rem' }}>{error}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -65,7 +162,11 @@ function AdminReports() {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                        <button className="btn btn-primary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                        <button 
+                            className="btn btn-primary" 
+                            onClick={handleExportReport}
+                            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                        >
                             <Download size={18} /> Export Report
                         </button>
                     </div>
@@ -90,7 +191,7 @@ function AdminReports() {
                 >
                     <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem' }}>Total Revenue</p>
                     <p style={{ margin: '0.75rem 0 0 0', fontSize: '2rem', fontWeight: 'bold', color: '#3B82F6' }}>
-                        ₹{totalRevenue.toLocaleString()}
+                        {loading ? '...' : `₹${totalRevenue.toLocaleString()}`}
                     </p>
                 </motion.div>
 
@@ -107,7 +208,7 @@ function AdminReports() {
                 >
                     <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem' }}>Total Orders</p>
                     <p style={{ margin: '0.75rem 0 0 0', fontSize: '2rem', fontWeight: 'bold', color: '#10B981' }}>
-                        {totalOrders}
+                        {loading ? '...' : totalOrders}
                     </p>
                 </motion.div>
 
@@ -124,85 +225,109 @@ function AdminReports() {
                 >
                     <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem' }}>Average Order Value</p>
                     <p style={{ margin: '0.75rem 0 0 0', fontSize: '2rem', fontWeight: 'bold', color: '#F59E0B' }}>
-                        ₹{averageOrderValue.toFixed(0)}
+                        {loading ? '...' : `₹${averageOrderValue}`}
                     </p>
                 </motion.div>
             </div>
 
-            {/* Sales Chart Simulation */}
+            {/* Sales Chart */}
             <div className="card" style={{ padding: '1.5rem' }}>
                 <h3 style={{ marginTop: 0 }}>Daily Sales Trend</h3>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    gap: '0.75rem',
-                    height: '200px',
-                    padding: '1rem 0'
-                }}>
-                    {salesData.map((day, index) => (
-                        <motion.div
-                            key={index}
-                            initial={{ height: 0 }}
-                            animate={{ height: `${(day.revenue / 12500) * 100}%` }}
-                            transition={{ delay: index * 0.1 }}
-                            style={{
-                                flex: 1,
-                                background: '#3B82F6',
-                                borderRadius: '0.5rem 0.5rem 0 0',
-                                position: 'relative',
-                                cursor: 'pointer',
-                                transition: 'background 0.3s'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = '#1D4ED8'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = '#3B82F6'}
-                            title={`${day.date}: ₹${day.revenue}`}
-                        />
-                    ))}
-                </div>
-                <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-around',
-                    fontSize: '0.75rem',
-                    color: 'var(--text-muted)',
-                    marginTop: '1rem'
-                }}>
-                    {salesData.map((day, index) => (
-                        <span key={index}>{day.date}</span>
-                    ))}
-                </div>
+                {loading && salesData.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                        Loading sales data...
+                    </div>
+                ) : (
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'flex-end',
+                        gap: '0.75rem',
+                        height: '200px',
+                        padding: '1rem 0'
+                    }}>
+                        {salesData.length === 0 ? (
+                            <div style={{ flex: 1, textAlign: 'center', color: 'var(--text-muted)' }}>
+                                No data available for this period
+                            </div>
+                        ) : (
+                            salesData.map((day, index) => {
+                                const maxRevenue = Math.max(...salesData.map(d => d.revenue), 1);
+                                return (
+                                    <motion.div
+                                        key={index}
+                                        initial={{ height: 0 }}
+                                        animate={{ height: `${(day.revenue / maxRevenue) * 100}%` }}
+                                        transition={{ delay: index * 0.05 }}
+                                        style={{
+                                            flex: 1,
+                                            background: '#3B82F6',
+                                            borderRadius: '0.5rem 0.5rem 0 0',
+                                            position: 'relative',
+                                            cursor: 'pointer',
+                                            transition: 'background 0.3s'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.background = '#1D4ED8'}
+                                        onMouseLeave={(e) => e.currentTarget.style.background = '#3B82F6'}
+                                        title={`${day.date}: ₹${day.revenue}`}
+                                    />
+                                );
+                            })
+                        )}
+                    </div>
+                )}
+                {salesData.length > 0 && (
+                    <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-around',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-muted)',
+                        marginTop: '1rem',
+                        flexWrap: 'wrap'
+                    }}>
+                        {salesData.map((day, index) => (
+                            <span key={index}>{day.date}</span>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Top Selling Items */}
             <div className="card" style={{ padding: '1.5rem' }}>
                 <h3 style={{ marginTop: 0 }}>Top Selling Items</h3>
-                <table style={{
-                    width: '100%',
-                    borderCollapse: 'collapse',
-                    fontSize: '0.875rem'
-                }}>
-                    <thead>
-                        <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                            <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Item</th>
-                            <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Units Sold</th>
-                            <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Revenue</th>
-                            <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Market Share</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {topItems.map((item, index) => {
-                            const totalSold = topItems.reduce((sum, i) => sum + i.sold, 0);
-                            const marketShare = ((item.sold / totalSold) * 100).toFixed(1);
-                            return (
+                {loading && topItems.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                        Loading top items...
+                    </div>
+                ) : topItems.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                        No order data available yet
+                    </div>
+                ) : (
+                    <table style={{
+                        width: '100%',
+                        borderCollapse: 'collapse',
+                        fontSize: '0.875rem'
+                    }}>
+                        <thead>
+                            <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Item</th>
+                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Units Sold</th>
+                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Revenue</th>
+                                <th style={{ textAlign: 'left', padding: '0.75rem', fontWeight: '600' }}>Market Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {topItems.map((item, index) => (
                                 <motion.tr
-                                    key={index}
+                                    key={item.productId}
                                     initial={{ opacity: 0, x: -20 }}
                                     animate={{ opacity: 1, x: 0 }}
                                     transition={{ delay: index * 0.05 }}
                                     style={{ borderBottom: '1px solid var(--border)' }}
                                 >
                                     <td style={{ padding: '0.75rem', fontWeight: '500' }}>{item.name}</td>
-                                    <td style={{ padding: '0.75rem' }}>{item.sold}</td>
-                                    <td style={{ padding: '0.75rem', fontWeight: '500', color: '#10B981' }}>₹{item.revenue}</td>
+                                    <td style={{ padding: '0.75rem' }}>{item.unitsSold}</td>
+                                    <td style={{ padding: '0.75rem', fontWeight: '500', color: '#10B981' }}>₹{item.revenue.toLocaleString()}</td>
                                     <td style={{ padding: '0.75rem' }}>
                                         <div style={{
                                             display: 'flex',
@@ -217,19 +342,19 @@ function AdminReports() {
                                                 overflow: 'hidden'
                                             }}>
                                                 <div style={{
-                                                    width: `${marketShare}%`,
+                                                    width: `${item.marketShare}%`,
                                                     height: '100%',
                                                     background: '#3B82F6'
                                                 }}></div>
                                             </div>
-                                            <span style={{ fontSize: '0.75rem' }}>{marketShare}%</span>
+                                            <span style={{ fontSize: '0.75rem' }}>{item.marketShare}%</span>
                                         </div>
                                     </td>
                                 </motion.tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
             </div>
         </div>
     );

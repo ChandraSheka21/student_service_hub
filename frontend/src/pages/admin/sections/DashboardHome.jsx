@@ -3,7 +3,7 @@ import { PackageOpen, AlertCircle, CheckCircle, TrendingUp, AlertTriangle, Users
 import { motion } from 'framer-motion';
 import { api } from '../../../services/api';
 
-function AdminDashboardHome() {
+function AdminDashboardHome({ socketEvents = {} }) {
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -13,6 +13,14 @@ function AdminDashboardHome() {
         const interval = setInterval(fetchStats, 30000); // Refresh every 30 seconds
         return () => clearInterval(interval);
     }, []);
+
+    // Refresh stats when real-time events occur
+    useEffect(() => {
+        if (socketEvents.newOrder || socketEvents.orderStatusChanged || socketEvents.stockUpdated) {
+            console.log('Real-time event detected, refreshing dashboard stats');
+            fetchStats();
+        }
+    }, [socketEvents.newOrder, socketEvents.orderStatusChanged, socketEvents.stockUpdated]);
 
     const fetchStats = async () => {
         try {

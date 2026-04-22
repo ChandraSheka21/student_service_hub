@@ -177,6 +177,15 @@ const setSession = (token, user, isAdmin = false) => {
   state.isAdmin = isAdmin;
   localStorage.setItem('token', token);
   localStorage.setItem('user', JSON.stringify(user));
+  
+  // Initialize Socket.io for student sessions (for real-time updates)
+  if (!isAdmin && user && typeof initSocket === 'function') {
+    // Use _id if available, otherwise use rollNo
+    const studentId = user._id || user.rollNo;
+    if (studentId) {
+      initSocket(studentId);
+    }
+  }
 };
 
 const clearSession = () => {
@@ -306,13 +315,36 @@ const renderDashboard = async () => {
           <button id="searchBtn" class="secondary">Search</button>
         </div>
         <div class="top-actions">
-          <button id="notificationsBtn">🔔</button>
+          <div style="position: relative; display: inline-block;">
+            <button id="notificationsBtn" style="position: relative;">🔔
+              <span id="notifications-badge" style="position: absolute; top: -8px; right: -8px; background: #EF4444; color: white; border-radius: 50%; width: 20px; height: 20px; display: none; flex-align: center; justify-content: center; font-size: 0.75rem; font-weight: bold; line-height: 20px; text-align: center; border: 2px solid white;"></span>
+            </button>
+          </div>
           <button id="profileBtn">👤 ${userName}</button>
-          ${state.currentModule === 'stationery' ? '<button id="cartBtn">🛒 Cart</button>' : ''}
+          ${state.currentModule === 'stationery' ? `
+            <div style="position: relative; display: inline-block;">
+              <button id="cartBtn" style="position: relative;">🛒 Cart
+                <span id="cart-badge" style="position: absolute; top: -8px; right: -8px; background: #EF4444; color: white; border-radius: 50%; width: 20px; height: 20px; display: none; flex-align: center; justify-content: center; font-size: 0.75rem; font-weight: bold; line-height: 20px; text-align: center; border: 2px solid white;"></span>
+              </button>
+            </div>
+          ` : ''}
         </div>
       </div>
 
       <div id="pageContent"></div>
+      
+      <!-- Notification Modal -->
+      <div id="notification-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; flex-align: center; justify-content: center; align-items: center;">
+        <div style="background: white; border-radius: 0.5rem; width: 90%; max-width: 500px; padding: 2rem; max-height: 70vh; overflow-y: auto;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
+            <h2 style="margin: 0; font-size: 1.3rem;">Notifications</h2>
+            <button id="close-notifications" style="background: none; border: none; cursor: pointer; font-size: 1.5rem; color: var(--text-muted);">✕</button>
+          </div>
+          <div id="notifications-list">
+            <p style="padding: 2rem; text-align: center; color: var(--text-muted);">No notifications</p>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
   `;
@@ -730,15 +762,28 @@ const mountShell = () => {
     });
   }
 
-  el('cartBtn')?.addEventListener('click', () => navigate('stationery/cart'));
+  el('cartBtn')?.addEventListener('click', () => {
+    resetCartBadge?.();
+    navigate('stationery/cart');
+  });
   el('profileBtn')?.addEventListener('click', () => navigate('profile'));
-  el('notificationsBtn')?.addEventListener('click', async () => {
-    try {
-      const list = await request('/notifications');
-      const messages = list.map((n) => `• ${n.message}`).join('\n');
-      alert(messages || 'No notifications');
-    } catch (err) {
-      showAlert(err.message, 'error');
+  el('notificationsBtn')?.addEventListener('click', () => {
+    if (typeof openNotificationPanel === 'function') {
+      openNotificationPanel();
+    }
+  });
+  
+  // Close notification modal
+  el('close-notifications')?.addEventListener('click', () => {
+    if (typeof closeNotificationPanel === 'function') {
+      closeNotificationPanel();
+    }
+  });
+  
+  // Close on outside click
+  el('notification-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'notification-modal' && typeof closeNotificationPanel === 'function') {
+      closeNotificationPanel();
     }
   });
 };

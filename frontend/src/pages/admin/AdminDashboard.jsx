@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, LayoutDashboard, Package, Bell, Warehouse, FileText, Settings } from 'lucide-react';
 import { motion } from 'framer-motion';
+import useSocket from '../../hooks/useSocket';
 import AdminDashboardHome from './sections/DashboardHome';
 import AdminOrders from './sections/Orders';
 import AdminNotifications from './sections/Notifications';
@@ -14,7 +15,11 @@ function AdminDashboard() {
     const [activeSection, setActiveSection] = useState('dashboard');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [unreadOrdersCount, setUnreadOrdersCount] = useState(0);
+    const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+    const [lowStockCount, setLowStockCount] = useState(0);
     const navigate = useNavigate();
+    const { isConnected, events } = useSocket();
 
     useEffect(() => {
         try {
@@ -37,6 +42,28 @@ function AdminDashboard() {
             setError(err.message);
         }
     }, [navigate]);
+
+    // Log real-time events
+    useEffect(() => {
+        if (events.newOrder) {
+            console.log('🆕 New order received in dashboard:', events.newOrder);
+            setUnreadOrdersCount(prev => prev + 1);
+        }
+        if (events.orderStatusChanged) {
+            console.log('📞 Order status changed:', events.orderStatusChanged);
+        }
+        if (events.stockUpdated) {
+            console.log('📦 Stock updated:', events.stockUpdated);
+            if (events.stockUpdated.isLowStock) {
+                setLowStockCount(prev => prev + 1);
+            }
+        }
+        if (events.lowStockAlert) {
+            console.log('⚠️ Low stock alert:', events.lowStockAlert);
+            setLowStockCount(prev => prev + 1);
+            setUnreadNotificationsCount(prev => prev + 1);
+        }
+    }, [events]);
 
     const handleLogout = () => {
         localStorage.removeItem('admin_token');
@@ -76,19 +103,19 @@ function AdminDashboard() {
         try {
             switch(activeSection) {
                 case 'dashboard':
-                    return <AdminDashboardHome />;
+                    return <AdminDashboardHome socketEvents={events} />;
                 case 'orders':
-                    return <AdminOrders />;
+                    return <AdminOrders socketEvents={events} />;
                 case 'notifications':
-                    return <AdminNotifications />;
+                    return <AdminNotifications socketEvents={events} />;
                 case 'stock':
-                    return <AdminStock />;
+                    return <AdminStock socketEvents={events} />;
                 case 'reports':
-                    return <AdminReports />;
+                    return <AdminReports socketEvents={events} />;
                 case 'settings':
-                    return <AdminSettings />;
+                    return <AdminSettings socketEvents={events} />;
                 default:
-                    return <AdminDashboardHome />;
+                    return <AdminDashboardHome socketEvents={events} />;
             }
         } catch (err) {
             console.error('Error rendering section:', err);
@@ -118,10 +145,21 @@ function AdminDashboard() {
                 <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}>
                     {sections.map((section) => {
                         const IconComponent = section.icon;
+                        let badge = 0;
+                        if (section.id === 'orders') badge = unreadOrdersCount;
+                        if (section.id === 'notifications') badge = unreadNotificationsCount;
+                        if (section.id === 'stock') badge = lowStockCount;
+
                         return (
                             <button
                                 key={section.id}
-                                onClick={() => setActiveSection(section.id)}
+                                onClick={() => {
+                                    setActiveSection(section.id);
+                                    // Reset badge when opening section
+                                    if (section.id === 'orders') setUnreadOrdersCount(0);
+                                    if (section.id === 'notifications') setUnreadNotificationsCount(0);
+                                    if (section.id === 'stock') setLowStockCount(0);
+                                }}
                                 style={{
                                     background: activeSection === section.id ? 'rgba(255,255,255,0.2)' : 'transparent',
                                     border: 'none',
@@ -134,12 +172,29 @@ function AdminDashboard() {
                                     gap: '0.75rem',
                                     fontSize: '0.9rem',
                                     transition: 'all 0.3s ease',
-                                    textAlign: 'left'
+                                    textAlign: 'left',
+                                    position: 'relative'
                                 }}
                                 className="btn"
                             >
                                 <IconComponent size={20} />
-                                {section.label}
+                                <span style={{ flex: 1 }}>{section.label}</span>
+                                {badge > 0 && (
+                                    <span style={{
+                                        background: '#EF4444',
+                                        color: 'white',
+                                        borderRadius: '50%',
+                                        width: '24px',
+                                        height: '24px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 'bold'
+                                    }}>
+                                        {badge}
+                                    </span>
+                                )}
                             </button>
                         );
                     })}

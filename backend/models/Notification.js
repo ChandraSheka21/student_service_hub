@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const NotificationSchema = new mongoose.Schema({
   recipientId: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true,
+    required: false, // Can be null for broadcast notifications
     refPath: 'recipientType'
   },
   recipientType: {

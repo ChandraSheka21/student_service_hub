@@ -1,6 +1,7 @@
 const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
+const Notification = require('../models/Notification');
 const generateOrderNumber = require('../utils/generateOrderId');
 const { addNotification } = require('../utils/notificationHelper');
 
@@ -58,6 +59,62 @@ const placeOrder = async (req, res) => {
   await Cart.findOneAndUpdate({ studentId }, { products: [] });
 
   addNotification(studentId, `Order ${orderNumber} was placed successfully.`);
+
+  // Emit real-time events
+  if (global.io) {
+    // Create notification in database for admin
+    try {
+      const adminNotification = await Notification.create({
+        recipientId: null, // Broadcast to all admins
+        recipientType: 'Admin',
+        type: 'new_order_received',
+        title: 'New Order Received',
+        message: `New order #${orderNumber} placed`,
+        orderId: order._id,
+        read: false
+      });
+    } catch (err) {
+      console.error('Error creating admin notification:', err);
+    }
+
+    // Get all admins in admin-room and increment badge
+    const unreadAdminOrders = await Order.countDocuments({
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+    }).sort({ createdAt: -1 });
+
+    // Notify admin of new order with badge
+    global.io.to('admin-room').emit('new-order', {
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      studentId: studentId.toString(),
+      items: order.items,
+      totalPrice: order.totalPrice,
+      status: order.status,
+      createdAt: order.createdAt,
+      badge: unreadAdminOrders // Unseen orders count
+    });
+
+    // Notify student dashboard of order update
+    global.io.to(`student-${studentId}`).emit('order-placed', {
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      items: order.items,
+      totalPrice: order.totalPrice,
+      status: order.status,
+      createdAt: order.createdAt
+    });
+
+    // Emit stock update event for each product
+    for (const item of normalized) {
+      const updatedProduct = await Product.findById(item.productId);
+      global.io.emit('stock-updated', {
+        productId: item.productId.toString(),
+        productName: item.name,
+        newStock: updatedProduct.stock,
+        minStock: updatedProduct.minStock
+      });
+    }
+  }
 
   res.status(201).json(order);
 };
@@ -117,6 +174,46 @@ const updateOrderStatus = async (req, res) => {
   await order.save();
 
   addNotification(order.studentId, `Order ${order.orderNumber} status updated to '${status}'.`);
+
+  // Create notification in database for student
+  if (global.io) {
+    try {
+      await Notification.create({
+        recipientId: order.studentId,
+        recipientType: 'Student',
+        type: 'order_status_updated',
+        title: 'Order Status Updated',
+        message: `Order #${order.orderNumber} is now ${status}`,
+        orderId: order._id,
+        read: false
+      });
+    } catch (err) {
+      console.error('Error creating student notification:', err);
+    }
+
+    // Get unread updates count for this student
+    const unreadUpdates = await Notification.countDocuments({
+      recipientId: order.studentId,
+      recipientType: 'Student',
+      read: false
+    });
+
+    // Emit order status update to student with badge
+    global.io.to(`student-${order.studentId}`).emit('order-status-updated', {
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      status: status,
+      badge: unreadUpdates
+    });
+
+    // Also notify admin of status change
+    global.io.to('admin-room').emit('order-status-changed', {
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      status: status,
+      studentId: order.studentId.toString()
+    });
+  }
 
   res.json(order);
 };

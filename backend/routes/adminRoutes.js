@@ -8,6 +8,8 @@ const {
   getInventory,
   updateStock,
   getStockAnalytics,
+  getDailySalesData,
+  getTopSellingItems,
   verifyUpload,
   deleteUpload
 } = require('../controllers/adminController');
@@ -37,6 +39,10 @@ router.put('/orders/:orderId/payment-status', updatePaymentStatus);
 router.get('/inventory', getInventory);
 router.get('/inventory/analytics', getStockAnalytics);
 router.put('/inventory/:productId', updateStock);
+
+// Reports
+router.get('/reports/daily-sales', getDailySalesData);
+router.get('/reports/top-items', getTopSellingItems);
 
 // Notifications
 router.get('/notifications', getNotifications);
