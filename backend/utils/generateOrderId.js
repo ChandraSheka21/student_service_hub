@@ -1,26 +1,32 @@
 const Order = require('../models/Order');
+const Counter = require('../models/Counter');
 
 /**
- * Generates a new unique order number like ORD2025001
+ * Generates a new unique order number like ORD2026000001
+ * Uses an atomic counter document so concurrent order placement cannot produce duplicates.
  */
 const generateOrderNumber = async () => {
   const year = new Date().getFullYear();
   const prefix = `ORD${year}`;
 
-  // Find last order for this year
-  const lastOrder = await Order.findOne({ orderNumber: { $regex: `^${prefix}` } })
-    .sort({ createdAt: -1 })
-    .lean();
+  let orderNumber;
 
-  let nextNumber = 1;
-  if (lastOrder && lastOrder.orderNumber) {
-    const match = lastOrder.orderNumber.match(/(\d+)$/);
-    if (match) {
-      nextNumber = parseInt(match[1], 10) + 1;
+  while (true) {
+    const counter = await Counter.findOneAndUpdate(
+      { name: `order-${year}` },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    orderNumber = `${prefix}${String(counter.seq).padStart(6, '0')}`;
+
+    const existingOrder = await Order.exists({ orderNumber });
+    if (!existingOrder) {
+      break;
     }
   }
 
-  return `${prefix}${String(nextNumber).padStart(3, '0')}`;
+  return orderNumber;
 };
 
 module.exports = generateOrderNumber;

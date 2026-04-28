@@ -13,20 +13,20 @@ npm start
 ```bash
 cd frontend
 npm run dev
-# Should show: ✨ Vite server at http://localhost:5173
+# Should show: ✨ Vite server at http://localhost:5174
 ```
 
 ## Testing Real-Time Synchronization
 
 ### Scenario 1: Order Status Update (Student Sees Instant Change)
 1. **Browser 1 (Student):**
-   - Go to `http://localhost:5173`
+   - Go to `http://localhost:5174`
    - Login with roll number: `1601-24-749-001`
    - Navigate to "Stationery" → "Orders"
    - Keep this page open
 
 2. **Browser 2 (Admin):**
-   - Go to `http://localhost:5173/admin-index.html`
+   - Go to `http://localhost:5174/admin-index.html`
    - Login with: username=`stationery-admin`, password=`secureAdminPass123`
    - Click "Orders" section
    - Find an order and click to view details

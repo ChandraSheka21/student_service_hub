@@ -1,10 +1,21 @@
-import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { BookOpen, ShieldCheck, BarChart3 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { api } from '../services/api';
+import { ShoppingCart, Share2, User, Lock, CheckCircle, X, Clock, Package, BookOpen, Award } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 function Home() {
+    const [rollNumber, setRollNumber] = useState('');
+    const [password, setPassword] = useState('');
+    const [adminUsername, setAdminUsername] = useState('');
+    const [adminPassword, setAdminPassword] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [loginMode, setLoginMode] = useState('student'); // 'student' or 'admin'
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+
+    const isAdminDirect = searchParams.get('role') === 'admin';
 
     useEffect(() => {
         // Check if user is already logged in
@@ -16,137 +27,267 @@ function Home() {
         } else if (studentRoll) {
             navigate('/student/dashboard');
         }
-    }, [navigate]);
 
-    const handleNavigate = (path) => {
-        navigate(path);
+        // Check if role is specified in URL params
+        const role = searchParams.get('role');
+        if (role === 'admin') {
+            setLoginMode('admin');
+        }
+    }, [searchParams, navigate]);
+
+    const handleStudentLogin = async (e) => {
+        e.preventDefault();
+        if (!rollNumber) {
+            setError('Please enter your roll number');
+            return;
+        }
+
+        setLoading(true);
+        setError('');
+
+        try {
+            const res = await api.loginStudent(rollNumber);
+            if (res.error) throw new Error(res.error);
+
+            localStorage.setItem('student_roll', res.roll_number);
+            navigate('/student/dashboard');
+        } catch (err) {
+            setError(err.message || 'Login failed');
+        } finally {
+            setLoading(false);
+        }
     };
 
+    const handleAdminLogin = async (e) => {
+        e.preventDefault();
+        if (!adminUsername || !adminPassword) {
+            setError('Please enter both username and password');
+            return;
+        }
+
+        setLoading(true);
+        setError('');
+
+        try {
+            const res = await fetch('http://localhost:5000/api/auth/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: adminUsername, password: adminPassword })
+            });
+            const data = await res.json();
+            
+            if (!res.ok) throw new Error(data.message || 'Login failed');
+
+            localStorage.setItem('admin_token', data.token);
+            localStorage.setItem('admin_username', data.admin.username);
+            localStorage.setItem('admin_auth', 'true');
+            navigate('/admin/dashboard');
+        } catch (err) {
+            setError(err.message || 'Invalid credentials');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Features data
+    const stationeryFeatures = [
+        { icon: Clock, title: 'Skip queues, order online', desc: 'Quick & easy ordering' },
+        { icon: Package, title: 'Fast & easy collection', desc: 'Pickup at your convenience' },
+        { icon: ShoppingCart, title: 'All essentials in one place', desc: 'Complete stationery hub' },
+        { icon: Clock, title: 'Track your order live', desc: 'Real-time order status' }
+    ];
+
+    const learnFeatures = [
+        { icon: BookOpen, title: 'Access notes & PYQs easily', desc: 'Study materials readily' },
+        { icon: Share2, title: 'Upload & share resources', desc: 'Help the community' },
+        { icon: Clock, title: 'Quick search', desc: 'Find instantly' },
+        { icon: Award, title: 'Earn top contributor rank', desc: 'Recognition & rewards' }
+    ];
+
     return (
-        <div className="page" style={{ 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            padding: '2rem',
-            background: 'linear-gradient(135deg, #f0fdfa 0%, #e0e7ff 100%)',
-            minHeight: '100vh'
-        }}>
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{ maxWidth: '600px', width: '100%', textAlign: 'center' }}
-            >
-                <h1 style={{ fontSize: '2.5rem', marginBottom: '1rem', color: 'var(--primary)' }}>
-                    Campus Stationery Hub
-                </h1>
-                <p style={{ fontSize: '1.1rem', color: 'var(--text-muted)', marginBottom: '3rem' }}>
-                    Your one-stop solution for all campus stationery needs
-                </p>
+        <div className="login-page">
+            <div className="login-shell">
+                <motion.div
+                    className="login-page__hero"
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                >
+                    <h1 className="login-page__hero-title">Smart Service Hub</h1>
+                    <p className="login-page__hero-subtitle">
+                        Your complete student companion for shopping & learning
+                    </p>
+                </motion.div>
 
-                <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                    gap: '1.5rem',
-                    marginBottom: '2rem'
-                }}>
+                <div className="login-grid">
                     <motion.div
-                        whileHover={{ scale: 1.05 }}
-                        className="card"
-                        onClick={() => handleNavigate('/login')}
-                        style={{
-                            padding: '2rem',
-                            cursor: 'pointer',
-                            border: '2px solid var(--primary)',
-                            transition: 'all 0.3s ease'
-                        }}
+                        className="feature-section"
+                        initial={{ opacity: 0, x: -30 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.1 }}
                     >
-                        <div style={{
-                            background: 'var(--primary)',
-                            width: '60px',
-                            height: '60px',
-                            borderRadius: '50%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'white',
-                            margin: '0 auto 1rem'
-                        }}>
-                            <BookOpen size={32} />
+                        <div className="feature-section__heading">
+                            <ShoppingCart size={32} />
+                            <span>Stationery</span>
                         </div>
-                        <h3 style={{ marginBottom: '0.5rem' }}>Student Login</h3>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                            Access your orders and manage purchases
-                        </p>
+                        {stationeryFeatures.map((feature, idx) => {
+                            const Icon = feature.icon;
+                            return (
+                                <motion.div
+                                    key={idx}
+                                    className="feature-card feature-card--stationery"
+                                    initial={{ opacity: 0, x: -20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: 0.2 + idx * 0.08 }}
+                                >
+                                    <div className="feature-card__icon">
+                                        <Icon size={22} />
+                                    </div>
+                                    <div>
+                                        <h4>{feature.title}</h4>
+                                        <p>{feature.desc}</p>
+                                    </div>
+                                </motion.div>
+                            );
+                        })}
                     </motion.div>
 
                     <motion.div
-                        whileHover={{ scale: 1.05 }}
-                        className="card"
-                        onClick={() => handleNavigate('/login')}
-                        style={{
-                            padding: '2rem',
-                            cursor: 'pointer',
-                            border: '2px solid var(--primary)',
-                            transition: 'all 0.3s ease'
-                        }}
+                        className="auth-column"
+                        initial={{ opacity: 0, scale: 0.96 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.15 }}
                     >
-                        <div style={{
-                            background: 'var(--primary)',
-                            width: '60px',
-                            height: '60px',
-                            borderRadius: '50%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'white',
-                            margin: '0 auto 1rem'
-                        }}>
-                            <ShieldCheck size={32} />
+                        <div className="auth-card">
+                            {!isAdminDirect && (
+                                <div className="auth-tab-group">
+                                    <button
+                                        className={`auth-tab ${loginMode === 'student' ? 'auth-tab--active' : ''}`}
+                                        onClick={() => { setLoginMode('student'); setError(''); }}
+                                        type="button"
+                                    >
+                                        Student
+                                    </button>
+                                    <button
+                                        className={`auth-tab ${loginMode === 'admin' ? 'auth-tab--active' : ''}`}
+                                        onClick={() => { setLoginMode('admin'); setError(''); }}
+                                        type="button"
+                                    >
+                                        Admin
+                                    </button>
+                                </div>
+                            )}
+
+                            {isAdminDirect && (
+                                <h3 className="auth-card__title">Admin Portal</h3>
+                            )}
+
+                            {loginMode === 'student' && !isAdminDirect && (
+                                <form onSubmit={handleStudentLogin} className="auth-form">
+                                    <div className="input-group">
+                                        <label className="input-label">Roll Number</label>
+                                        <div className="input-with-icon">
+                                            <User size={18} />
+                                            <input
+                                                type="text"
+                                                className="input"
+                                                placeholder="e.g. 1601-24-749-001"
+                                                value={rollNumber}
+                                                onChange={(e) => setRollNumber(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {error && <div className="auth-error">{error}</div>}
+
+                                    <button type="submit" className="btn btn-primary" disabled={loading}>
+                                        {loading ? 'Logging in...' : 'Enter as Student'}
+                                    </button>
+                                </form>
+                            )}
+
+                            {(isAdminDirect || loginMode === 'admin') && (
+                                <form onSubmit={handleAdminLogin} className="auth-form">
+                                    <div className="input-group">
+                                        <label className="input-label">Username</label>
+                                        <div className="input-with-icon">
+                                            <User size={18} />
+                                            <input
+                                                type="text"
+                                                className="input"
+                                                placeholder="Admin username"
+                                                value={adminUsername}
+                                                onChange={(e) => setAdminUsername(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="input-group">
+                                        <label className="input-label">Password</label>
+                                        <div className="input-with-icon">
+                                            <Lock size={18} />
+                                            <input
+                                                type="password"
+                                                className="input"
+                                                placeholder="Enter password"
+                                                value={adminPassword}
+                                                onChange={(e) => setAdminPassword(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {error && <div className="auth-error">{error}</div>}
+
+                                    <button type="submit" className="btn btn-primary" disabled={loading}>
+                                        {loading ? 'Logging in...' : 'Enter as Admin'}
+                                    </button>
+
+                                    {isAdminDirect && (
+                                        <button
+                                            type="button"
+                                            className="btn btn-secondary"
+                                            onClick={() => navigate('/')}
+                                        >
+                                            Back to Student Login
+                                        </button>
+                                    )}
+                                </form>
+                            )}
                         </div>
-                        <h3 style={{ marginBottom: '0.5rem' }}>Admin Access</h3>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                            Manage products and monitor sales
-                        </p>
                     </motion.div>
 
                     <motion.div
-                        whileHover={{ scale: 1.05 }}
-                        className="card"
-                        onClick={() => handleNavigate('/login')}
-                        style={{
-                            padding: '2rem',
-                            cursor: 'pointer',
-                            border: '2px solid var(--primary)',
-                            transition: 'all 0.3s ease'
-                        }}
+                        className="feature-section"
+                        initial={{ opacity: 0, x: 30 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.1 }}
                     >
-                        <div style={{
-                            background: 'var(--primary)',
-                            width: '60px',
-                            height: '60px',
-                            borderRadius: '50%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'white',
-                            margin: '0 auto 1rem'
-                        }}>
-                            <BarChart3 size={32} />
+                        <div className="feature-section__heading">
+                            <Share2 size={32} />
+                            <span>Share & Learn</span>
                         </div>
-                        <h3 style={{ marginBottom: '0.5rem' }}>Manager Portal</h3>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                            Track inventory and revenue
-                        </p>
+                        {learnFeatures.map((feature, idx) => {
+                            const Icon = feature.icon;
+                            return (
+                                <motion.div
+                                    key={idx}
+                                    className="feature-card feature-card--learn"
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: 0.2 + idx * 0.08 }}
+                                >
+                                    <div className="feature-card__icon">
+                                        <Icon size={22} />
+                                    </div>
+                                    <div>
+                                        <h4>{feature.title}</h4>
+                                        <p>{feature.desc}</p>
+                                    </div>
+                                </motion.div>
+                            );
+                        })}
                     </motion.div>
                 </div>
-
-                <button
-                    onClick={() => handleNavigate('/login')}
-                    className="btn btn-primary"
-                    style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}
-                >
-                    Get Started
-                </button>
-            </motion.div>
+            </div>
         </div>
     );
 }

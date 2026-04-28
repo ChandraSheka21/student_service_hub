@@ -312,7 +312,7 @@ const renderDashboard = async () => {
       <div class="topbar">
         <div class="search">
           <input id="searchInput" type="search" placeholder="Search..." />
-          <button id="searchBtn" class="secondary">Search</button>
+          <button id="topSearchBtn" class="secondary">Search</button>
         </div>
         <div class="top-actions">
           <div style="position: relative; display: inline-block;">
@@ -748,7 +748,7 @@ const mountShell = () => {
     });
   });
 
-  const searchBtn = el('searchBtn');
+  const searchBtn = el('topSearchBtn');
   if (searchBtn) {
     searchBtn.addEventListener('click', () => {
       const term = el('searchInput').value.trim();

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../../services/api';
-import { ShoppingCart, LogOut, Package, Clock, Plus, Minus, Trash2 } from 'lucide-react';
+import { ShoppingCart, LogOut, Package, Clock, Plus, Minus, Trash2, CheckCircle, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 function StudentDashboard() {
@@ -9,6 +9,7 @@ function StudentDashboard() {
     const [cart, setCart] = useState([]);
     const [loading, setLoading] = useState(true);
     const [checkoutLoading, setCheckoutLoading] = useState(false);
+    const [notification, setNotification] = useState(null);
 
     const rollNumber = localStorage.getItem('student_roll');
     const navigate = useNavigate();
@@ -32,15 +33,32 @@ function StudentDashboard() {
         }
     };
 
+    const showNotification = (productName) => {
+        setNotification({
+            id: Date.now(),
+            productName,
+            message: 'added to cart successfully!'
+        });
+
+        // Auto-hide notification after 3 seconds
+        const timer = setTimeout(() => {
+            setNotification(null);
+        }, 3000);
+
+        return () => clearTimeout(timer);
+    };
+
     const addToCart = (product) => {
         setCart((prevCart) => {
             const existing = prevCart.find(item => item.product_id === product.id);
             if (existing) {
                 if (existing.quantity >= product.stock) return prevCart; // limit to stock
+                showNotification(product.name);
                 return prevCart.map(item =>
                     item.product_id === product.id ? { ...item, quantity: item.quantity + 1 } : item
                 );
             }
+            showNotification(product.name);
             return [...prevCart, { product_id: product.id, name: product.name, price: product.price, quantity: 1, maxStock: product.stock }];
         });
     };
@@ -91,6 +109,65 @@ function StudentDashboard() {
 
     return (
         <div className="page">
+            {/* Cart Notification Popup */}
+            <AnimatePresence>
+                {notification && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -20, x: '50%' }}
+                        animate={{ opacity: 1, y: 0, x: '50%' }}
+                        exit={{ opacity: 0, y: -20, x: '50%' }}
+                        style={{
+                            position: 'fixed',
+                            top: '20px',
+                            right: '20px',
+                            transform: 'translateX(-50%)',
+                            background: 'white',
+                            borderRadius: '12px',
+                            boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
+                            padding: '1.2rem',
+                            minWidth: '300px',
+                            zIndex: 1000,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '1rem'
+                        }}
+                    >
+                        <div style={{
+                            background: '#4ade80',
+                            borderRadius: '50%',
+                            padding: '0.5rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'white',
+                            flexShrink: 0
+                        }}>
+                            <CheckCircle size={24} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <p style={{ margin: 0, fontWeight: '700', color: '#333' }}>
+                                {notification.productName}
+                            </p>
+                            <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.9rem', color: '#666' }}>
+                                {notification.message}
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => setNotification(null)}
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: '#999',
+                                padding: '0.2rem'
+                            }}
+                        >
+                            <X size={20} />
+                        </button>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             <nav className="navbar">
                 <Link to="/student/dashboard" className="navbar-brand">
                     <Package size={24} /> <span>Stationery Store</span>
